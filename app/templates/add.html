@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Add Product — Pricediff</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="max-w-2xl mx-auto p-6">
+    <a href="/" class="text-blue-600 text-sm">&larr; Dashboard</a>
+    <h1 class="text-2xl font-bold mt-4 mb-6">Add Product</h1>
+
+    <form id="addForm" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium mb-1">Product URL</label>
+        <input type="url" name="url" required
+          class="w-full border rounded-lg px-3 py-2 text-sm"
+          placeholder="https://www.amazon.com/dp/..." />
+      </div>
+      <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm hover:bg-blue-700">
+        Add & Scrape
+      </button>
+    </form>
+  </div>
+
+  <script>
+    document.getElementById('addForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const url = e.target.url.value;
+      const res = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      if (res.ok) {
+        window.location.href = '/';
+      } else {
+        alert('Failed to add product');
+      }
+    });
+  </script>
+</body>
+</html>
