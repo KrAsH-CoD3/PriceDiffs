@@ -214,7 +214,10 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
     Tries without proxy first (faster for unprotected sites),
     then retries with proxy if configured.
     """
-    for proxy_url in [None, PROXY_URL]:
+    proxy_candidates = [None]
+    if PROXY_URL:
+        proxy_candidates.append(PROXY_URL)
+    for proxy_url in proxy_candidates:
         try:
             timeout_val = 30 if proxy_url else 15
             kwargs = {"proxy": proxy_url} if proxy_url else {}
