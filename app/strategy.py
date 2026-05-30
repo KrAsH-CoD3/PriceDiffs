@@ -625,19 +625,9 @@ async def _extract_via_api(url: str, strategy: dict) -> dict | None:
     headers = api.get("req_headers", {})
     mapping = api.get("field_mapping", {})
 
-    # Fast path: JSON-LD fields cached from discovery - only when URL matches sample
+    # JSON-LD strategy: always extract from the actual URL (domain-wide, not URL-locked)
     jsonld_fields = api.get("_jsonld_fields")
-    if jsonld_fields and url == strategy.get("sample_url", ""):
-        return {
-            "title": jsonld_fields.get("title", ""),
-            "price": float(jsonld_fields.get("price", 0)),
-            "rating": jsonld_fields.get("rating", ""),
-            "image_url": jsonld_fields.get("image_url", ""),
-            "currency": jsonld_fields.get("currency", "NGN"),
-        }
-
-    # JSON-LD strategy but different URL: re-extract from current page via HTTP
-    if jsonld_fields and url != strategy.get("sample_url", ""):
+    if jsonld_fields is not None:
         domain = get_domain(url)
         result = await _try_jsonld_from_http(domain, url)
         if result:
