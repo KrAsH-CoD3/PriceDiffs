@@ -75,3 +75,47 @@ def mark_failure(strategy: dict):
     strategy["failure_count"] = strategy.get("failure_count", 0) + 1
     _save_meta(strategy)
 
+
+# ─── CloakBrowser browser — single instance across sessions ─────────────
+
+_browser_instance = None
+_playwright_instance = None
+
+
+async def _get_browser():
+    global _browser_instance, _playwright_instance
+    if _browser_instance and _browser_instance.is_connected():
+        return _browser_instance
+    _playwright_instance = await async_playwright().start()
+    launch_kwargs = {
+        "executable_path": CLOAK_BINARY,
+        "headless": True,
+        "args": ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+    }
+    if PROXY_URL:
+        from urllib.parse import urlparse
+        parsed = urlparse(PROXY_URL)
+        proxy_config = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
+        if parsed.username:
+            proxy_config["username"] = parsed.username
+        if parsed.password:
+            proxy_config["password"] = parsed.password
+        launch_kwargs["proxy"] = proxy_config
+    _browser_instance = await _playwright_instance.chromium.launch(**launch_kwargs)
+    return _browser_instance
+
+
+async def _close_browser():
+    global _browser_instance, _playwright_instance
+    if _browser_instance:
+        try:
+            await _browser_instance.close()
+        except Exception:
+            pass
+        _browser_instance = None
+    if _playwright_instance:
+        try:
+            await _playwright_instance.stop()
+        except Exception:
+            pass
+        _playwright_instance = None
