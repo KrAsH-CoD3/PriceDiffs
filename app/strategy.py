@@ -766,6 +766,34 @@ JSON.stringify({
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# SINGLE-URL SCRAPE (shared by views, scrape command, and scheduler)
+# ═══════════════════════════════════════════════════════════════════════
+
+async def scrape_url(url: str) -> dict | None:
+    """Scrape a single product URL end-to-end.
+    
+    Loads cached strategy or forges a new one, extracts data.
+    Returns dict with keys: title, price, rating, image_url, currency
+    or None if all attempts failed.
+    """
+    domain = get_domain(url)
+    strategy = load_strategy(domain)
+
+    if strategy and not needs_rediscovery(strategy):
+        data = await extract_with_strategy(url, strategy)
+        if data and data.get("title") and data.get("price", 0) > 0:
+            mark_success(strategy)
+            return data
+        mark_failure(strategy)
+
+    strategy = await forge_strategy(url)
+    if not strategy:
+        return None
+    mark_success(strategy)
+    return await extract_with_strategy(url, strategy)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # VERIFICATION (Phase 3 — Delivery step)
 # ═══════════════════════════════════════════════════════════════════════
 

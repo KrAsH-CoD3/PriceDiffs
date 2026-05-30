@@ -1,16 +1,7 @@
 import asyncio
 import os
 
-from app.strategy import (
-    get_domain,
-    load_strategy,
-    needs_rediscovery,
-    forge_strategy,
-    extract_with_strategy,
-    mark_success,
-    mark_failure,
-    _close_browser,
-)
+from app.strategy import scrape_url, _close_browser
 
 SCRAPE_INTERVAL_SECONDS = int(os.environ.get("PRICEDIFF_SCRAPE_INTERVAL", "3600"))
 _loop_task: asyncio.Task | None = None
@@ -35,24 +26,9 @@ async def scrape_all():
 
     for product in products:
         url = product.url
-        domain = get_domain(url)
-        strategy = load_strategy(domain)
-
-        if strategy and not needs_rediscovery(strategy):
-            data = await extract_with_strategy(url, strategy)
-            if data and data.get("title") and data.get("price", 0) > 0:
-                mark_success(strategy)
-            else:
-                mark_failure(strategy)
-                continue
-        else:
-            strategy = await forge_strategy(url)
-            if not strategy:
-                continue
-            mark_success(strategy)
-            data = await extract_with_strategy(url, strategy)
-            if not data:
-                continue
+        data = await scrape_url(url)
+        if not data:
+            continue
 
         product.title = data.get("title", product.title)
         product.image_url = data.get("image_url", product.image_url)

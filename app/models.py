@@ -1,7 +1,15 @@
+from django.conf import settings
 from django.db import models
 
 
 class Product(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="products",
+        null=True,
+        blank=True,
+    )
     url = models.URLField()
     title = models.CharField(max_length=500, default="")
     image_url = models.URLField(max_length=2000, default="")
