@@ -29,10 +29,15 @@
         return;
       }
 
+      function currencySymbol(currency) {
+        return currency === 'NGN' ? '\u20A6' : '$';
+      }
+
       const cards = await Promise.all(products.map(async (p) => {
         const detail = await fetch(`/api/products/${p.id}`).then(r => r.json());
         const s = detail.snapshots;
         const latest = s.length > 0 ? s[0] : null;
+        const sym = latest ? currencySymbol(latest.currency) : '$';
         const change = detail.price_change_24h;
         const changeColor = change === null ? '' : change < 0 ? 'text-green-600' : change > 0 ? 'text-red-600' : '';
 
@@ -47,8 +52,8 @@
             </div>
             <div class="mt-3 flex items-baseline justify-between">
               ${latest ? `
-                <span class="text-2xl font-bold">$${latest.price.toFixed(2)}</span>
-                ${change !== null ? `<span class="text-sm ${changeColor}">${change > 0 ? '▲' : '▼'} $${Math.abs(change).toFixed(2)}</span>` : ''}
+                <span class="text-2xl font-bold">${sym}${latest.price.toFixed(2)}</span>
+                ${change !== null ? `<span class="text-sm ${changeColor}">${change > 0 ? '▲' : '▼'} ${sym}${Math.abs(change).toFixed(2)}</span>` : ''}
               ` : `<span class="text-gray-400 text-sm">Not scraped yet</span>`}
             </div>
             ${s.length > 1 ? `
@@ -57,7 +62,8 @@
                   const h = detail.highest_price || sp.price;
                   const l = detail.lowest_price || sp.price;
                   const pct = h > l ? (sp.price - l) / (h - l) : 0.5;
-                  return `<div class="flex-1 bg-blue-500 rounded-t" style="height:${Math.max(8, pct * 40)}px" title="$${sp.price.toFixed(2)}"></div>`;
+                  const spSym = currencySymbol(sp.currency);
+                  return `<div class="flex-1 bg-blue-500 rounded-t" style="height:${Math.max(8, pct * 40)}px" title="${spSym}${sp.price.toFixed(2)}"></div>`;
                 }).join('')}
               </div>
             ` : ''}

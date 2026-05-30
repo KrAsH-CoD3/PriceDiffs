@@ -1,0 +1,39 @@
+{
+  "domain": "agbeke.com",
+  "site_name": "Agbeke",
+  "strategy_type": "api",
+  "api": {
+    "endpoint": "https://agbeke.com/product/ayo-2/",
+    "method": "GET",
+    "req_headers": {},
+    "field_mapping": {
+      "title": [
+        "jsonld",
+        "title"
+      ],
+      "price": [
+        "jsonld",
+        "price"
+      ],
+      "rating": [
+        "jsonld",
+        "rating"
+      ],
+      "image_url": [
+        "jsonld",
+        "image_url"
+      ]
+    },
+    "_jsonld_fields": {
+      "title": "Ayo",
+      "price": 130000.0,
+      "rating": "",
+      "image_url": "https://agbeke.com/wp-content/uploads/2026/03/Ayo.jpg"
+    }
+  },
+  "sample_url": "https://agbeke.com/product/ayo-2/",
+  "success_count": 2,
+  "failure_count": 0,
+  "created_at": "2026-05-30T00:38:37.182845+00:00",
+  "updated_at": "2026-05-30T02:00:59.838837+00:00"
+}

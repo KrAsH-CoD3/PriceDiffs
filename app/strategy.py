@@ -86,23 +86,27 @@ async def _get_browser():
     global _browser_instance, _playwright_instance
     if _browser_instance and _browser_instance.is_connected():
         return _browser_instance
-    _playwright_instance = await async_playwright().start()
-    launch_kwargs = {
-        "executable_path": CLOAK_BINARY,
-        "headless": True,
-        "args": ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
-    }
-    if PROXY_URL:
-        from urllib.parse import urlparse
-        parsed = urlparse(PROXY_URL)
-        proxy_config = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
-        if parsed.username:
-            proxy_config["username"] = parsed.username
-        if parsed.password:
-            proxy_config["password"] = parsed.password
-        launch_kwargs["proxy"] = proxy_config
-    _browser_instance = await _playwright_instance.chromium.launch(**launch_kwargs)
-    return _browser_instance
+    try:
+        _playwright_instance = await async_playwright().start()
+        launch_kwargs = {
+            "executable_path": CLOAK_BINARY,
+            "headless": True,
+            "args": ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+        }
+        if PROXY_URL:
+            from urllib.parse import urlparse
+            parsed = urlparse(PROXY_URL)
+            proxy_config = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
+            if parsed.username:
+                proxy_config["username"] = parsed.username
+            if parsed.password:
+                proxy_config["password"] = parsed.password
+            launch_kwargs["proxy"] = proxy_config
+        _browser_instance = await _playwright_instance.chromium.launch(**launch_kwargs)
+        return _browser_instance
+    except Exception:
+        _browser_instance = None
+        return None
 
 
 async def _close_browser():
@@ -146,6 +150,9 @@ async def forge_strategy(url: str) -> dict | None:
 
     # ── Phase 2b: Browser-based exploration ──────────────────────────
     browser = await _get_browser()
+    if not browser:
+        print(f"  [forge] Browser unavailable, skipping {domain}")
+        return None
     page = await browser.new_page()
     responses = []
 
@@ -214,7 +221,11 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
     Tries without proxy first (faster for unprotected sites),
     then retries with proxy if configured.
     """
-    for proxy_url in [None, PROXY_URL]:
+    proxy_candidates = [None]
+    if PROXY_URL:
+        proxy_candidates.append(PROXY_URL)
+    html = None
+    for proxy_url in proxy_candidates:
         try:
             timeout_val = 30 if proxy_url else 15
             kwargs = {"proxy": proxy_url} if proxy_url else {}
@@ -228,6 +239,8 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
             if proxy_url == PROXY_URL:
                 return None
             continue
+    if html is None:
+        return None
 
     import re
     ld_pattern = r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>'
@@ -243,6 +256,11 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
         offers = product.get("offers", {})
         if isinstance(offers, list):
             offers = offers[0] if offers else {}
+        currency_code = "NGN"
+        if isinstance(offers, dict):
+            currency_code = offers.get("priceCurrency", "NGN")
+        elif isinstance(offers, list) and offers:
+            currency_code = offers[0].get("priceCurrency", "NGN")
         price_raw = offers.get("price") if isinstance(offers, dict) else None
         if price_raw is None and isinstance(offers, dict):
             spec = offers.get("priceSpecification")
@@ -285,6 +303,7 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
                     "price": price,
                     "rating": str(rating),
                     "image_url": image if isinstance(image, str) else "",
+                    "currency": currency_code,
                 },
             },
             "sample_url": url,
@@ -606,18 +625,9 @@ async def _extract_via_api(url: str, strategy: dict) -> dict | None:
     headers = api.get("req_headers", {})
     mapping = api.get("field_mapping", {})
 
-    # Fast path: JSON-LD fields cached from discovery - only when URL matches sample
+    # JSON-LD strategy: always extract from the actual URL (domain-wide, not URL-locked)
     jsonld_fields = api.get("_jsonld_fields")
-    if jsonld_fields and url == strategy.get("sample_url", ""):
-        return {
-            "title": jsonld_fields.get("title", ""),
-            "price": float(jsonld_fields.get("price", 0)),
-            "rating": jsonld_fields.get("rating", ""),
-            "image_url": jsonld_fields.get("image_url", ""),
-        }
-
-    # JSON-LD strategy but different URL: re-extract from current page via HTTP
-    if jsonld_fields and url != strategy.get("sample_url", ""):
+    if jsonld_fields is not None:
         domain = get_domain(url)
         result = await _try_jsonld_from_http(domain, url)
         if result:
@@ -627,6 +637,7 @@ async def _extract_via_api(url: str, strategy: dict) -> dict | None:
                 "price": float(fields.get("price", 0)),
                 "rating": fields.get("rating", ""),
                 "image_url": fields.get("image_url", ""),
+                "currency": fields.get("currency", "NGN"),
             }
         return None
 
@@ -662,6 +673,7 @@ async def _extract_via_api(url: str, strategy: dict) -> dict | None:
         "price": price_val,
         "rating": result.get("rating", ""),
         "image_url": result.get("image_url", ""),
+        "currency": "NGN",
     }
 
 
@@ -700,6 +712,7 @@ async def _extract_via_dom(url: str, strategy: dict) -> dict | None:
         "price": price_val,
         "rating": (result.get("rating") or "").strip(),
         "image_url": (result.get("image_url") or "").strip(),
+        "currency": result.get("currency") or "NGN",
     }
 
 
@@ -727,20 +740,26 @@ def _build_dom_extract_js(selectors: dict) -> str:
             parts.append(f"{rv} = ''")
 
     js = ";\n".join(parts) + ";\n" + """
-var priceMatch = priceText.match(/[\\u20A6\\$]\\s*([0-9,]+)/) || priceText.match(/([0-9,]+)\\s*[\\u20A6\\$]/);
+var match1 = priceText.match(/\\u20A6\\s*([0-9,]+)/);
+var match2 = priceText.match(/\\$\\s*([0-9,]+)/);
+var match3 = priceText.match(/([0-9,]+)\\s*\\u20A6/);
+var match4 = priceText.match(/([0-9,]+)\\s*\\$/);
+var priceMatch = match1 || match2 || match3 || match4;
+var currencyCode = match1 || match3 ? 'NGN' : (priceMatch ? 'USD' : '');
 var ratingMatch = ratingText.match(/([\\d.]+)\\s*out\\s*of\\s*5/i);
 var ogPrice = (document.querySelector("meta[property='product:price:amount']") || {}).content || "";
 var ogImage = (document.querySelector("meta[property='og:image']") || {}).content || "";
 var ogTitle = (document.querySelector("meta[property='og:title']") || {}).content || "";
 if (!title && ogTitle) title = ogTitle;
 if (!imageSrc && ogImage) imageSrc = ogImage;
-if (!priceMatch && ogPrice) { priceText = ogPrice; priceMatch = ogPrice.match(/[\\u20A6\\$]\\s*([0-9,]+)/) || ogPrice.match(/([0-9,]+)\\s*[\\u20A6\\$]/); }
+if (!priceMatch && ogPrice) { priceText = ogPrice; match1 = ogPrice.match(/\\u20A6\\s*([0-9,]+)/); match2 = ogPrice.match(/\\$\\s*([0-9,]+)/); match3 = ogPrice.match(/([0-9,]+)\\s*\\u20A6/); match4 = ogPrice.match(/([0-9,]+)\\s*\\$/); priceMatch = match1 || match2 || match3 || match4; currencyCode = match1 || match3 ? 'NGN' : (priceMatch ? 'USD' : ''); }
 var priceStr = priceMatch ? priceMatch[1].replace(/,/g, "") : "0";
 JSON.stringify({
     title: title || "",
     price: priceStr,
     rating: ratingMatch ? ratingMatch[1] : "",
-    image_url: (imageSrc || "").startsWith("http") ? imageSrc : (imageSrc ? new URL(imageSrc, document.baseURI).href : "")
+    image_url: (imageSrc || "").startsWith("http") ? imageSrc : (imageSrc ? new URL(imageSrc, document.baseURI).href : ""),
+    currency: currencyCode
 });
 """
     return js

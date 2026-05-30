@@ -1,0 +1,28 @@
+{
+  "domain": "jumia.com.ng",
+  "site_name": "Jumia Ng",
+  "strategy_type": "api",
+  "api": {
+    "endpoint": "https://www.jumia.com.ng",
+    "method": "GET",
+    "req_headers": {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    },
+    "field_mapping": {
+      "title": ["jsonld", "title"],
+      "price": ["jsonld", "price"],
+      "rating": ["jsonld", "rating"],
+      "image_url": ["jsonld", "image_url"]
+    },
+    "_jsonld_fields": {
+      "title": "Redmi G34WQ 2026 Curved Gaming Monitors",
+      "price": 595000.0,
+      "rating": "",
+      "image_url": "",
+      "currency": "NGN"
+    }
+  },
+  "sample_url": "https://www.jumia.com.ng/xiaomi-redmi-g34wq-2026-curved-gaming-monitors-419014126.html",
+  "success_count": 0,
+  "failure_count": 0
+}

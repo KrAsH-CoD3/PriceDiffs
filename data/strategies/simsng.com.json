@@ -1,0 +1,39 @@
+{
+  "domain": "simsng.com",
+  "site_name": "Simsng",
+  "strategy_type": "api",
+  "api": {
+    "endpoint": "https://simsng.com/product/tcl-98-inch-qd-mini-led-tv-98c6k/",
+    "method": "GET",
+    "req_headers": {},
+    "field_mapping": {
+      "title": [
+        "jsonld",
+        "title"
+      ],
+      "price": [
+        "jsonld",
+        "price"
+      ],
+      "rating": [
+        "jsonld",
+        "rating"
+      ],
+      "image_url": [
+        "jsonld",
+        "image_url"
+      ]
+    },
+    "_jsonld_fields": {
+      "title": "TCL 98\" Inch QD-Mini LED TV (98C6K)",
+      "price": 3277500.0,
+      "rating": "",
+      "image_url": "https://simsng.com/wp-content/uploads/2026/02/TCL20982220Inch20QD-Mini20LED20TV202898C6K29.jpg"
+    }
+  },
+  "sample_url": "https://simsng.com/product/tcl-98-inch-qd-mini-led-tv-98c6k/",
+  "success_count": 4,
+  "failure_count": 0,
+  "created_at": "2026-05-30T00:38:52.673024+00:00",
+  "updated_at": "2026-05-30T02:01:17.510156+00:00"
+}
