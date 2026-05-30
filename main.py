@@ -6,6 +6,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from app.database import init_db
 from app.routes import router
+from app.scheduler import start as start_scheduler, stop as stop_scheduler
 
 BASE_DIR = Path(__file__).parent
 TEMPLATES_DIR = BASE_DIR / "app" / "templates"
@@ -16,7 +17,9 @@ STATIC_DIR.mkdir(exist_ok=True)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await start_scheduler()
     yield
+    await stop_scheduler()
 
 
 app = FastAPI(title="Pricediff", lifespan=lifespan)

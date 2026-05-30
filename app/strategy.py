@@ -86,23 +86,27 @@ async def _get_browser():
     global _browser_instance, _playwright_instance
     if _browser_instance and _browser_instance.is_connected():
         return _browser_instance
-    _playwright_instance = await async_playwright().start()
-    launch_kwargs = {
-        "executable_path": CLOAK_BINARY,
-        "headless": True,
-        "args": ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
-    }
-    if PROXY_URL:
-        from urllib.parse import urlparse
-        parsed = urlparse(PROXY_URL)
-        proxy_config = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
-        if parsed.username:
-            proxy_config["username"] = parsed.username
-        if parsed.password:
-            proxy_config["password"] = parsed.password
-        launch_kwargs["proxy"] = proxy_config
-    _browser_instance = await _playwright_instance.chromium.launch(**launch_kwargs)
-    return _browser_instance
+    try:
+        _playwright_instance = await async_playwright().start()
+        launch_kwargs = {
+            "executable_path": CLOAK_BINARY,
+            "headless": True,
+            "args": ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+        }
+        if PROXY_URL:
+            from urllib.parse import urlparse
+            parsed = urlparse(PROXY_URL)
+            proxy_config = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
+            if parsed.username:
+                proxy_config["username"] = parsed.username
+            if parsed.password:
+                proxy_config["password"] = parsed.password
+            launch_kwargs["proxy"] = proxy_config
+        _browser_instance = await _playwright_instance.chromium.launch(**launch_kwargs)
+        return _browser_instance
+    except Exception:
+        _browser_instance = None
+        return None
 
 
 async def _close_browser():
@@ -146,6 +150,9 @@ async def forge_strategy(url: str) -> dict | None:
 
     # ── Phase 2b: Browser-based exploration ──────────────────────────
     browser = await _get_browser()
+    if not browser:
+        print(f"  [forge] Browser unavailable, skipping {domain}")
+        return None
     page = await browser.new_page()
     responses = []
 
@@ -217,6 +224,7 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
     proxy_candidates = [None]
     if PROXY_URL:
         proxy_candidates.append(PROXY_URL)
+    html = None
     for proxy_url in proxy_candidates:
         try:
             timeout_val = 30 if proxy_url else 15
@@ -231,6 +239,8 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
             if proxy_url == PROXY_URL:
                 return None
             continue
+    if html is None:
+        return None
 
     import re
     ld_pattern = r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>'
