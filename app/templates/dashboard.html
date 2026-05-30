@@ -3,14 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pricediff</title>
+  <title>PriceDiffs</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-50 text-gray-900">
   <div class="max-w-6xl mx-auto p-6">
     <header class="flex items-center justify-between mb-8">
-      <h1 class="text-3xl font-bold tracking-tight">Pricediff</h1>
-      <a href="/add" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">+ Add Product</a>
+      <h1 class="text-3xl font-bold tracking-tight">PriceDiffs</h1>
+      <div class="flex items-center gap-3">
+        <span id="username" class="text-sm text-gray-500"></span>
+        <a href="/add" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">+ Add Product</a>
+        <button id="logoutBtn" class="text-sm text-gray-500 hover:text-red-600 hidden">Logout</button>
+      </div>
     </header>
 
     <div id="products" class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -19,10 +23,62 @@
   </div>
 
   <script>
+    const ACCESS = localStorage.getItem('access');
+
+    async function api(path, options = {}) {
+      const headers = { ...options.headers };
+      if (ACCESS) headers['Authorization'] = `Bearer ${ACCESS}`;
+      if (options.body && !(options.body instanceof FormData)) {
+        headers['Content-Type'] = 'application/json';
+      }
+      return fetch(path, { ...options, headers });
+    }
+
+    async function checkAuth() {
+      if (!ACCESS) {
+        window.location.href = '/login';
+        return;
+      }
+      const res = await api('/api/auth/me');
+      if (!res.ok) {
+        localStorage.removeItem('access');
+        localStorage.removeItem('refresh');
+        window.location.href = '/login';
+        return;
+      }
+      const text = await res.text();
+      let user;
+      try { user = JSON.parse(text); } catch(e) {
+        document.getElementById('products').innerHTML =
+          `<div class="col-span-full text-center py-12 text-red-400">Auth endpoint returned HTML instead of JSON. Check console.</div>`;
+        console.error('Auth response was HTML:', text.slice(0, 200));
+        return;
+      }
+      document.getElementById('username').textContent = user.username;
+      document.getElementById('logoutBtn').classList.remove('hidden');
+    }
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      localStorage.removeItem('access');
+      localStorage.removeItem('refresh');
+      window.location.href = '/login';
+    });
+
     async function loadProducts() {
-      const res = await fetch('/api/products');
-      const products = await res.json();
+      try {
+      const res = await api('/api/products');
+      const bodyText = await res.text();
+      if (!res.ok) {
+        document.getElementById('products').innerHTML = `<div class="col-span-full text-center py-12 text-red-400">API error: ${res.status} — ${bodyText.slice(0, 100)}</div>`;
+        return;
+      }
+      const products = JSON.parse(bodyText);
       const container = document.getElementById('products');
+
+      if (!Array.isArray(products)) {
+        container.innerHTML = `<div class="col-span-full text-center py-12 text-red-400">Unexpected response format</div>`;
+        return;
+      }
 
       if (products.length === 0) {
         container.innerHTML = `<div class="col-span-full text-center py-12 text-gray-400">No products tracked yet. <a href="/add" class="text-blue-600 underline">Add one</a></div>`;
@@ -34,7 +90,8 @@
       }
 
       const cards = await Promise.all(products.map(async (p) => {
-        const detail = await fetch(`/api/products/${p.id}`).then(r => r.json());
+        const detailRes = await api(`/api/products/${p.id}`);
+        const detail = detailRes.ok ? await detailRes.json() : { snapshots: [] };
         const s = detail.snapshots;
         const latest = s.length > 0 ? s[0] : null;
         const sym = latest ? currencySymbol(latest.currency) : '$';
@@ -76,9 +133,12 @@
       }));
 
       container.innerHTML = cards.join('');
+      } catch (e) {
+        document.getElementById('products').innerHTML = `<div class="col-span-full text-center py-12 text-red-400">Error: ${e.message}</div>`;
+      }
     }
 
-    loadProducts();
+    checkAuth().then(loadProducts);
   </script>
 </body>
 </html>
