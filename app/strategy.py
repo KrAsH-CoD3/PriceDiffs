@@ -120,6 +120,84 @@ async def _close_browser():
             pass
         _playwright_instance = None
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# PHASE 2 — CAPABILITY EXPLORATION
+# Priority: API endpoints → JS runtime → DOM
+# ═══════════════════════════════════════════════════════════════════════
+
+async def forge_strategy(url: str) -> dict | None:
+    """Full Phase 2 → Phase 3 workflow powered by CloakBrowser.
+
+    1. Probe page with direct HTTP for embedded JSON-LD (fast path)
+    2. Open page with CloakBrowser, capture network traffic
+    3. Inspect XHR/fetch responses for product data APIs
+    4. If no API → DOM probe → save DOM strategy
+    5. Verify strategy works before returning
+    """
+    domain = get_domain(url)
+
+    # ── Phase 2a: Direct HTTP probe for JSON-LD (no browser needed) ──
+    strategy = await _try_jsonld_from_http(domain, url)
+    if strategy:
+        print(f"  [forge] JSON-LD strategy found for {domain} via HTTP")
+        _save_meta(strategy)
+        return strategy
+
+    # ── Phase 2b: Browser-based exploration ──────────────────────────
+    browser = await _get_browser()
+    page = await browser.new_page()
+    responses = []
+
+    async def on_response(resp):
+        responses.append({
+            "url": resp.url,
+            "status": resp.status,
+            "method": resp.request.method,
+            "headers": resp.headers,
+            "request_headers": resp.request.headers,
+            "body": await safe_text(resp),
+        })
+
+    page.on("response", on_response)
+
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        await page.wait_for_timeout(2000)
+    except Exception as e:
+        print(f"  [forge] Page load error: {e}")
+        await page.close()
+        return None
+
+    # ── Phase 2c: API endpoint discovery ─────────────────────────────
+    strategy = _discover_api_from_responses(domain, url, responses)
+    if strategy:
+        print(f"  [forge] API strategy found for {domain}, verifying...")
+        await page.close()
+        if await _verify_strategy(url, strategy):
+            _save_meta(strategy)
+            return strategy
+        print(f"  [forge] API verification failed, falling back to DOM")
+        # Re-create page (was closed during verify) and navigate
+        page = await browser.new_page()
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(2000)
+        except Exception:
+            await page.close()
+            return None
+
+    # ── Phase 2d: DOM fallback — probe CSS selectors ─────────────────
+    print(f"  [forge] Probing DOM selectors for {domain}...")
+    strategy = await _discover_dom(domain, url, page)
+    await page.close()
+    if strategy and await _verify_strategy(url, strategy):
+        _save_meta(strategy)
+        return strategy
+
+    return None
+
+
 async def safe_text(resp) -> str:
     """Safely read response body, return empty string on error."""
     try:
@@ -233,120 +311,7 @@ def _drill_to_product(data):
             result = _drill_to_product(val)
             if result:
                 return result
-
-async def safe_text(resp) -> str:
-    """Safely read response body, return empty string on error."""
-    try:
-        return await resp.text()
-    except Exception:
-        return ""
-
-
-# ── Phase 2a — Direct HTTP probe for embedded JSON-LD ──────────────────
-
-async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
-    """Fetch page via plain HTTP and extract JSON-LD structured data.
-    
-    Tries without proxy first (faster for unprotected sites),
-    then retries with proxy if configured.
-    """
-    for proxy_url in [None, PROXY_URL]:
-        try:
-            timeout_val = 30 if proxy_url else 15
-            kwargs = {"proxy": proxy_url} if proxy_url else {}
-            async with httpx.AsyncClient(follow_redirects=True, timeout=timeout_val, **kwargs) as client:
-                resp = await client.get(url, headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                })
-                resp.raise_for_status()
-                html = resp.text
-        except Exception:
-            if proxy_url == PROXY_URL:
-                return None
-            continue
-
-    import re
-    ld_pattern = r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>'
-    for m in re.finditer(ld_pattern, html, re.DOTALL):
-        try:
-            data = json.loads(m.group(1))
-        except json.JSONDecodeError:
-            continue
-        product = _drill_to_product(data)
-        if not product:
-            continue
-        name = product.get("name", "")
-        offers = product.get("offers", {})
-        if isinstance(offers, list):
-            offers = offers[0] if offers else {}
-        price_raw = offers.get("price") if isinstance(offers, dict) else None
-        if price_raw is None and isinstance(offers, dict):
-            spec = offers.get("priceSpecification")
-            if isinstance(spec, list):
-                price_raw = spec[0].get("price") if spec else None
-            elif isinstance(spec, dict):
-                price_raw = spec.get("price")
-        if not name or price_raw is None:
-            continue
-
-        if isinstance(price_raw, str):
-            price = float(price_raw.replace(",", ""))
-        else:
-            price = float(price_raw)
-        image = product.get("image", "")
-        if isinstance(image, dict) and image.get("@type") == "ImageObject":
-            urls = image.get("contentUrl", image.get("url", ""))
-            image = urls[0] if isinstance(urls, list) else urls
-        if isinstance(image, list):
-            image = image[0] if image else ""
-        rating_obj = product.get("aggregateRating", {})
-        if isinstance(rating_obj, list):
-            rating_obj = rating_obj[0] if rating_obj else {}
-        rating = rating_obj.get("ratingValue", "")
-
-        return {
-            "domain": domain,
-            "site_name": domain.split(".")[0].capitalize(),
-            "strategy_type": "api",
-            "api": {
-                "endpoint": url,
-                "method": "GET",
-                "req_headers": {},
-                "field_mapping": {
-                    k: ["jsonld", k]
-                    for k in ("title", "price", "rating", "image_url")
-                },
-                "_jsonld_fields": {
-                    "title": name,
-                    "price": price,
-                    "rating": str(rating),
-                    "image_url": image if isinstance(image, str) else "",
-                },
-            },
-            "sample_url": url,
-            "success_count": 0,
-            "failure_count": 0,
-        }
-    return None
-
-
-def _drill_to_product(data):
-    """Walk JSON-LD to find a Product or mainEntity of type Product."""
-    if isinstance(data, dict):
-        if data.get("@type") == "Product":
-            return data
-        if data.get("mainEntity", {}).get("@type") == "Product":
-            return data["mainEntity"]
-        # @graph format: array of items inside @graph
-        graph = data.get("@graph")
-        if isinstance(graph, list):
-            for item in graph:
-                if isinstance(item, dict) and item.get("@type") == "Product":
-                    return item
-        for val in data.values():
-            result = _drill_to_product(val)
-            if result:
-                return result
+    elif isinstance(data, list):
         for item in data:
             result = _drill_to_product(item)
             if result:
@@ -482,6 +447,8 @@ def _score_mapping(mapping: dict) -> int:
     score = 0
     if mapping.get("title"):
         score += 3
+    if mapping.get("price"):
+        score += 3
     if mapping.get("rating"):
         score += 1
     if mapping.get("image_url"):
@@ -595,6 +562,7 @@ async def _discover_dom(domain: str, url: str, page) -> dict | None:
             "page_title": probe.get("_html_title", ""),
             "og_title": og_title,
             "og_image": og_image,
+            "og_price": og_price,
         },
         "sample_url": url,
         "success_count": 0,
@@ -756,3 +724,38 @@ def _build_dom_extract_js(selectors: dict) -> str:
                 parts.append(
                     f"{rv} = ({sv} ? ({sv}.textContent||{sv}.innerText||'').trim() : '')")
         else:
+            parts.append(f"{rv} = ''")
+
+    js = ";\n".join(parts) + ";\n" + """
+var priceMatch = priceText.match(/[\\u20A6\\$]\\s*([0-9,]+)/) || priceText.match(/([0-9,]+)\\s*[\\u20A6\\$]/);
+var ratingMatch = ratingText.match(/([\\d.]+)\\s*out\\s*of\\s*5/i);
+var ogPrice = (document.querySelector("meta[property='product:price:amount']") || {}).content || "";
+var ogImage = (document.querySelector("meta[property='og:image']") || {}).content || "";
+var ogTitle = (document.querySelector("meta[property='og:title']") || {}).content || "";
+if (!title && ogTitle) title = ogTitle;
+if (!imageSrc && ogImage) imageSrc = ogImage;
+if (!priceMatch && ogPrice) { priceText = ogPrice; priceMatch = ogPrice.match(/[\\u20A6\\$]\\s*([0-9,]+)/) || ogPrice.match(/([0-9,]+)\\s*[\\u20A6\\$]/); }
+var priceStr = priceMatch ? priceMatch[1].replace(/,/g, "") : "0";
+JSON.stringify({
+    title: title || "",
+    price: priceStr,
+    rating: ratingMatch ? ratingMatch[1] : "",
+    image_url: (imageSrc || "").startsWith("http") ? imageSrc : (imageSrc ? new URL(imageSrc, document.baseURI).href : "")
+});
+"""
+    return js
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# VERIFICATION (Phase 3 — Delivery step)
+# ═══════════════════════════════════════════════════════════════════════
+
+async def _verify_strategy(url: str, strategy: dict) -> bool:
+    data = await extract_with_strategy(url, strategy)
+    if data is None:
+        return False
+    if not data.get("title") or len(data["title"]) < 3:
+        return False
+    if not data.get("price", 0) > 0:
+        return False
+    return True
