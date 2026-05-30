@@ -1,7 +1,7 @@
 [project]
 name = "pricediff"
 version = "0.2.0"
-description = "Price tracking dashboard — built with Django"
+description = "Price tracking dashboard"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
