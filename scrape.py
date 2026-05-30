@@ -69,8 +69,10 @@ async def main():
             print(f"  Failed to scrape {url}")
             continue
 
+        currency = data.get("currency", "NGN")
+        symbol = "₦" if currency == "NGN" else "$"
         print(f"  Title: {data['title'][:60]}...")
-        print(f"  Price: ${data['price']:.2f}")
+        print(f"  Price: {symbol}{data['price']:.2f}")
 
         async with httpx.AsyncClient(base_url=API_BASE) as client:
             await client.patch(f"/api/products/{product['id']}", json={
@@ -79,7 +81,7 @@ async def main():
                 "rating": data["rating"],
             })
             await client.post(
-                f"/api/snapshots?product_id={product['id']}&price={data['price']}"
+                f"/api/snapshots?product_id={product['id']}&price={data['price']}&currency={currency}"
             )
 
     await _close_browser()

@@ -243,6 +243,11 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
         offers = product.get("offers", {})
         if isinstance(offers, list):
             offers = offers[0] if offers else {}
+        currency_code = "NGN"
+        if isinstance(offers, dict):
+            currency_code = offers.get("priceCurrency", "NGN")
+        elif isinstance(offers, list) and offers:
+            currency_code = offers[0].get("priceCurrency", "NGN")
         price_raw = offers.get("price") if isinstance(offers, dict) else None
         if price_raw is None and isinstance(offers, dict):
             spec = offers.get("priceSpecification")
@@ -285,6 +290,7 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
                     "price": price,
                     "rating": str(rating),
                     "image_url": image if isinstance(image, str) else "",
+                    "currency": currency_code,
                 },
             },
             "sample_url": url,
@@ -614,6 +620,7 @@ async def _extract_via_api(url: str, strategy: dict) -> dict | None:
             "price": float(jsonld_fields.get("price", 0)),
             "rating": jsonld_fields.get("rating", ""),
             "image_url": jsonld_fields.get("image_url", ""),
+            "currency": jsonld_fields.get("currency", "NGN"),
         }
 
     # JSON-LD strategy but different URL: re-extract from current page via HTTP
@@ -627,6 +634,7 @@ async def _extract_via_api(url: str, strategy: dict) -> dict | None:
                 "price": float(fields.get("price", 0)),
                 "rating": fields.get("rating", ""),
                 "image_url": fields.get("image_url", ""),
+                "currency": fields.get("currency", "NGN"),
             }
         return None
 
@@ -662,6 +670,7 @@ async def _extract_via_api(url: str, strategy: dict) -> dict | None:
         "price": price_val,
         "rating": result.get("rating", ""),
         "image_url": result.get("image_url", ""),
+        "currency": "NGN",
     }
 
 
@@ -700,6 +709,7 @@ async def _extract_via_dom(url: str, strategy: dict) -> dict | None:
         "price": price_val,
         "rating": (result.get("rating") or "").strip(),
         "image_url": (result.get("image_url") or "").strip(),
+        "currency": result.get("currency") or "NGN",
     }
 
 
@@ -727,20 +737,26 @@ def _build_dom_extract_js(selectors: dict) -> str:
             parts.append(f"{rv} = ''")
 
     js = ";\n".join(parts) + ";\n" + """
-var priceMatch = priceText.match(/[\\u20A6\\$]\\s*([0-9,]+)/) || priceText.match(/([0-9,]+)\\s*[\\u20A6\\$]/);
+var match1 = priceText.match(/\\u20A6\\s*([0-9,]+)/);
+var match2 = priceText.match(/\\$\\s*([0-9,]+)/);
+var match3 = priceText.match(/([0-9,]+)\\s*\\u20A6/);
+var match4 = priceText.match(/([0-9,]+)\\s*\\$/);
+var priceMatch = match1 || match2 || match3 || match4;
+var currencyCode = match1 || match3 ? 'NGN' : (priceMatch ? 'USD' : '');
 var ratingMatch = ratingText.match(/([\\d.]+)\\s*out\\s*of\\s*5/i);
 var ogPrice = (document.querySelector("meta[property='product:price:amount']") || {}).content || "";
 var ogImage = (document.querySelector("meta[property='og:image']") || {}).content || "";
 var ogTitle = (document.querySelector("meta[property='og:title']") || {}).content || "";
 if (!title && ogTitle) title = ogTitle;
 if (!imageSrc && ogImage) imageSrc = ogImage;
-if (!priceMatch && ogPrice) { priceText = ogPrice; priceMatch = ogPrice.match(/[\\u20A6\\$]\\s*([0-9,]+)/) || ogPrice.match(/([0-9,]+)\\s*[\\u20A6\\$]/); }
+if (!priceMatch && ogPrice) { priceText = ogPrice; match1 = ogPrice.match(/\\u20A6\\s*([0-9,]+)/); match2 = ogPrice.match(/\\$\\s*([0-9,]+)/); match3 = ogPrice.match(/([0-9,]+)\\s*\\u20A6/); match4 = ogPrice.match(/([0-9,]+)\\s*\\$/); priceMatch = match1 || match2 || match3 || match4; currencyCode = match1 || match3 ? 'NGN' : (priceMatch ? 'USD' : ''); }
 var priceStr = priceMatch ? priceMatch[1].replace(/,/g, "") : "0";
 JSON.stringify({
     title: title || "",
     price: priceStr,
     rating: ratingMatch ? ratingMatch[1] : "",
-    image_url: (imageSrc || "").startsWith("http") ? imageSrc : (imageSrc ? new URL(imageSrc, document.baseURI).href : "")
+    image_url: (imageSrc || "").startsWith("http") ? imageSrc : (imageSrc ? new URL(imageSrc, document.baseURI).href : ""),
+    currency: currencyCode
 });
 """
     return js
