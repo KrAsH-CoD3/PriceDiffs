@@ -25,18 +25,52 @@
   </div>
 
   <script>
-    document.getElementById('addForm').addEventListener('submit', async (e) => {
+    const ACCESS = localStorage.getItem('access');
+
+    async function api(path, options = {}) {
+      const headers = { ...options.headers };
+      if (ACCESS) headers['Authorization'] = `Bearer ${ACCESS}`;
+      if (options.body && !(options.body instanceof FormData)) {
+        headers['Content-Type'] = 'application/json';
+      }
+      return fetch(path, { ...options, headers });
+    }
+
+    async function checkAuth() {
+      if (!ACCESS) {
+        window.location.href = '/login';
+        return;
+      }
+      const res = await api('/api/auth/me');
+      if (!res.ok) {
+        localStorage.removeItem('access');
+        localStorage.removeItem('refresh');
+        window.location.href = '/login';
+      }
+    }
+
+    checkAuth();
+
+    const form = document.getElementById('addForm');
+    const submitBtn = form.querySelector('button[type="submit"]');
+
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Scraping...';
+      submitBtn.classList.remove('hover:bg-blue-700');
       const url = e.target.url.value;
-      const res = await fetch('/api/products', {
+      const res = await api('/api/products', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
       });
       if (res.ok) {
         window.location.href = '/';
       } else {
         alert('Failed to add product');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Add & Scrape';
+        submitBtn.classList.add('hover:bg-blue-700');
       }
     });
   </script>
