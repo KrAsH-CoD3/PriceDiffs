@@ -482,3 +482,116 @@ def _score_mapping(mapping: dict) -> int:
     score = 0
     if mapping.get("title"):
         score += 3
+    if mapping.get("rating"):
+        score += 1
+    if mapping.get("image_url"):
+        score += 1
+    return score
+
+
+# ── Phase 2c — DOM discovery (fallback) ────────────────────────────────
+
+async def _discover_dom(domain: str, url: str, page) -> dict | None:
+    """DOM-based fallback: probe CSS selectors and OG meta tags."""
+    probe_js = r"""
+(() => {
+    const candidates = {
+        title: [
+            "#productTitle", "h1", "[data-testid*='title']", "[data-testid*='product-title']",
+            ".product-title", ".ProductTitle", ".product-name", ".ProductName",
+            "[itemprop='name']", ".title", ".headline", ".product-header__title",
+            "h1 span", ".page-title", "[class*='product'] h1",
+            ".b-advert-title", ".qa-advert-title", "[class*='advert-title']"
+        ],
+        price: [
+            ".a-price .a-offscreen", "[data-testid*='price']", ".price", ".product-price",
+            ".ProductPrice", "[itemprop='price']", ".sale-price", ".regular-price",
+            ".price-value", "[class*='price']", ".a-price-whole",
+            "[data-automation='product-price']", ".price-current",
+            ".qa-advert-price-view-value", ".b-alt-advert-price__text", "[class*='advert-price']"
+        ],
+        rating: [
+            "#acrPopover", "[data-testid*='rating']", ".rating", ".star-rating",
+            "[itemprop='ratingValue']", ".rating-number", ".stars", "[class*='rating']",
+            ".product-rating", ".average-rating"
+        ],
+        image: [
+            "#landingImage", "[data-testid*='image'] img", ".product-image img",
+            ".ProductImage img", "[itemprop='image']", ".main-image img",
+            ".product-hero img", "[class*='gallery'] img", ".carousel img",
+            "img[src*='product']", ".product__image img",
+            ".b-slider-image", "[class*='slider-image']"
+        ]
+    };
+    const results = {};
+    for (const [field, selectors] of Object.entries(candidates)) {
+        for (const sel of selectors) {
+            try {
+                const el = document.querySelector(sel);
+                if (!el) continue;
+                const text = (el.textContent || el.innerText || "").trim();
+                const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
+                const alt = el.getAttribute("alt") || "";
+                const href = el.getAttribute("href") || "";
+                results[field] = {
+                    selector: sel, text: text.slice(0, 300), src: src.slice(0, 500),
+                    alt: alt.slice(0, 100), href: href.slice(0, 500),
+                    tag: el.tagName.toLowerCase(),
+                    is_visible: !!(el.offsetParent || el.offsetWidth || el.offsetHeight)
+                };
+                break;
+            } catch(e) { continue; }
+        }
+        if (!results[field]) results[field] = { selector: null, text: "", src: "" };
+    }
+    results._html_title = document.title;
+    results._meta_desc = (document.querySelector("meta[name='description']") || {}).content || "";
+    results._og_image = (document.querySelector("meta[property='og:image']") || {}).content || "";
+    results._og_title = (document.querySelector("meta[property='og:title']") || {}).content || "";
+    results._og_price = (document.querySelector("meta[property='product:price:amount']") || {}).content || "";
+    return JSON.stringify(results);
+})();
+"""
+    try:
+        raw = await page.evaluate(probe_js)
+    except Exception:
+        return None
+
+    if not raw or not raw.startswith("{"):
+        return None
+    try:
+        probe = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+    selectors = {}
+    for field in ("title", "price", "rating", "image"):
+        info = probe.get(field) or {}
+        sel = info.get("selector")
+        text = info.get("text", "")
+        src = info.get("src", "") or info.get("href", "")
+        selectors[field] = {"css": sel, "sample": (text or src or "")[:200]}
+
+    og_title = probe.get("_og_title", "")
+    og_image = probe.get("_og_image", "")
+    og_price = probe.get("_og_price", "")
+
+    if not selectors["title"]["css"] and og_title:
+        selectors["title"] = {"css": None, "sample": og_title, "source": "og:title"}
+    if not selectors["image"]["css"] and og_image:
+        selectors["image"] = {"css": None, "sample": og_image, "source": "og:image"}
+    if not selectors["price"]["css"] and og_price:
+        selectors["price"] = {"css": None, "sample": og_price, "source": "og:price"}
+
+    if not any(v.get("css") or v.get("source") for v in selectors.values()):
+        return None
+
+    return {
+        "domain": domain,
+        "site_name": domain.split(".")[0].capitalize(),
+        "strategy_type": "dom",
+        "dom": {"selectors": selectors},
+        "meta": {
+            "page_title": probe.get("_html_title", ""),
+            "og_title": og_title,
+            "og_image": og_image,
