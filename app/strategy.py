@@ -119,3 +119,231 @@ async def _close_browser():
         except Exception:
             pass
         _playwright_instance = None
+
+async def safe_text(resp) -> str:
+    """Safely read response body, return empty string on error."""
+    try:
+        return await resp.text()
+    except Exception:
+        return ""
+
+
+# ── Phase 2a — Direct HTTP probe for embedded JSON-LD ──────────────────
+
+async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
+    """Fetch page via plain HTTP and extract JSON-LD structured data.
+    
+    Tries without proxy first (faster for unprotected sites),
+    then retries with proxy if configured.
+    """
+    for proxy_url in [None, PROXY_URL]:
+        try:
+            timeout_val = 30 if proxy_url else 15
+            kwargs = {"proxy": proxy_url} if proxy_url else {}
+            async with httpx.AsyncClient(follow_redirects=True, timeout=timeout_val, **kwargs) as client:
+                resp = await client.get(url, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                })
+                resp.raise_for_status()
+                html = resp.text
+        except Exception:
+            if proxy_url == PROXY_URL:
+                return None
+            continue
+
+    import re
+    ld_pattern = r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>'
+    for m in re.finditer(ld_pattern, html, re.DOTALL):
+        try:
+            data = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            continue
+        product = _drill_to_product(data)
+        if not product:
+            continue
+        name = product.get("name", "")
+        offers = product.get("offers", {})
+        if isinstance(offers, list):
+            offers = offers[0] if offers else {}
+        price_raw = offers.get("price") if isinstance(offers, dict) else None
+        if price_raw is None and isinstance(offers, dict):
+            spec = offers.get("priceSpecification")
+            if isinstance(spec, list):
+                price_raw = spec[0].get("price") if spec else None
+            elif isinstance(spec, dict):
+                price_raw = spec.get("price")
+        if not name or price_raw is None:
+            continue
+
+        if isinstance(price_raw, str):
+            price = float(price_raw.replace(",", ""))
+        else:
+            price = float(price_raw)
+        image = product.get("image", "")
+        if isinstance(image, dict) and image.get("@type") == "ImageObject":
+            urls = image.get("contentUrl", image.get("url", ""))
+            image = urls[0] if isinstance(urls, list) else urls
+        if isinstance(image, list):
+            image = image[0] if image else ""
+        rating_obj = product.get("aggregateRating", {})
+        if isinstance(rating_obj, list):
+            rating_obj = rating_obj[0] if rating_obj else {}
+        rating = rating_obj.get("ratingValue", "")
+
+        return {
+            "domain": domain,
+            "site_name": domain.split(".")[0].capitalize(),
+            "strategy_type": "api",
+            "api": {
+                "endpoint": url,
+                "method": "GET",
+                "req_headers": {},
+                "field_mapping": {
+                    k: ["jsonld", k]
+                    for k in ("title", "price", "rating", "image_url")
+                },
+                "_jsonld_fields": {
+                    "title": name,
+                    "price": price,
+                    "rating": str(rating),
+                    "image_url": image if isinstance(image, str) else "",
+                },
+            },
+            "sample_url": url,
+            "success_count": 0,
+            "failure_count": 0,
+        }
+    return None
+
+
+def _drill_to_product(data):
+    """Walk JSON-LD to find a Product or mainEntity of type Product."""
+    if isinstance(data, dict):
+        if data.get("@type") == "Product":
+            return data
+        if data.get("mainEntity", {}).get("@type") == "Product":
+            return data["mainEntity"]
+        # @graph format: array of items inside @graph
+        graph = data.get("@graph")
+        if isinstance(graph, list):
+            for item in graph:
+                if isinstance(item, dict) and item.get("@type") == "Product":
+                    return item
+        for val in data.values():
+            result = _drill_to_product(val)
+            if result:
+                return result
+
+async def safe_text(resp) -> str:
+    """Safely read response body, return empty string on error."""
+    try:
+        return await resp.text()
+    except Exception:
+        return ""
+
+
+# ── Phase 2a — Direct HTTP probe for embedded JSON-LD ──────────────────
+
+async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
+    """Fetch page via plain HTTP and extract JSON-LD structured data.
+    
+    Tries without proxy first (faster for unprotected sites),
+    then retries with proxy if configured.
+    """
+    for proxy_url in [None, PROXY_URL]:
+        try:
+            timeout_val = 30 if proxy_url else 15
+            kwargs = {"proxy": proxy_url} if proxy_url else {}
+            async with httpx.AsyncClient(follow_redirects=True, timeout=timeout_val, **kwargs) as client:
+                resp = await client.get(url, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                })
+                resp.raise_for_status()
+                html = resp.text
+        except Exception:
+            if proxy_url == PROXY_URL:
+                return None
+            continue
+
+    import re
+    ld_pattern = r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>'
+    for m in re.finditer(ld_pattern, html, re.DOTALL):
+        try:
+            data = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            continue
+        product = _drill_to_product(data)
+        if not product:
+            continue
+        name = product.get("name", "")
+        offers = product.get("offers", {})
+        if isinstance(offers, list):
+            offers = offers[0] if offers else {}
+        price_raw = offers.get("price") if isinstance(offers, dict) else None
+        if price_raw is None and isinstance(offers, dict):
+            spec = offers.get("priceSpecification")
+            if isinstance(spec, list):
+                price_raw = spec[0].get("price") if spec else None
+            elif isinstance(spec, dict):
+                price_raw = spec.get("price")
+        if not name or price_raw is None:
+            continue
+
+        if isinstance(price_raw, str):
+            price = float(price_raw.replace(",", ""))
+        else:
+            price = float(price_raw)
+        image = product.get("image", "")
+        if isinstance(image, dict) and image.get("@type") == "ImageObject":
+            urls = image.get("contentUrl", image.get("url", ""))
+            image = urls[0] if isinstance(urls, list) else urls
+        if isinstance(image, list):
+            image = image[0] if image else ""
+        rating_obj = product.get("aggregateRating", {})
+        if isinstance(rating_obj, list):
+            rating_obj = rating_obj[0] if rating_obj else {}
+        rating = rating_obj.get("ratingValue", "")
+
+        return {
+            "domain": domain,
+            "site_name": domain.split(".")[0].capitalize(),
+            "strategy_type": "api",
+            "api": {
+                "endpoint": url,
+                "method": "GET",
+                "req_headers": {},
+                "field_mapping": {
+                    k: ["jsonld", k]
+                    for k in ("title", "price", "rating", "image_url")
+                },
+                "_jsonld_fields": {
+                    "title": name,
+                    "price": price,
+                    "rating": str(rating),
+                    "image_url": image if isinstance(image, str) else "",
+                },
+            },
+            "sample_url": url,
+            "success_count": 0,
+            "failure_count": 0,
+        }
+    return None
+
+
+def _drill_to_product(data):
+    """Walk JSON-LD to find a Product or mainEntity of type Product."""
+    if isinstance(data, dict):
+        if data.get("@type") == "Product":
+            return data
+        if data.get("mainEntity", {}).get("@type") == "Product":
+            return data["mainEntity"]
+        # @graph format: array of items inside @graph
+        graph = data.get("@graph")
+        if isinstance(graph, list):
+            for item in graph:
+                if isinstance(item, dict) and item.get("@type") == "Product":
+                    return item
+        for val in data.values():
+            result = _drill_to_product(val)
+            if result:
+                return result
