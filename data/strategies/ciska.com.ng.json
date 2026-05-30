@@ -1,0 +1,39 @@
+{
+  "domain": "ciska.com.ng",
+  "site_name": "Ciska",
+  "strategy_type": "api",
+  "api": {
+    "endpoint": "https://ciska.com.ng/product/original-classic-designer-sneakers-apr6/",
+    "method": "GET",
+    "req_headers": {},
+    "field_mapping": {
+      "title": [
+        "jsonld",
+        "title"
+      ],
+      "price": [
+        "jsonld",
+        "price"
+      ],
+      "rating": [
+        "jsonld",
+        "rating"
+      ],
+      "image_url": [
+        "jsonld",
+        "image_url"
+      ]
+    },
+    "_jsonld_fields": {
+      "title": "Original Classic Designer Sneakers APR6",
+      "price": 188500.0,
+      "rating": "",
+      "image_url": "https://ciska.com.ng/wp-content/uploads/2026/04/WhatsApp-Image-2026-03-29-at-11.39.45-PM.jpeg"
+    }
+  },
+  "sample_url": "https://ciska.com.ng/product/original-classic-designer-sneakers-apr6/",
+  "success_count": 4,
+  "failure_count": 0,
+  "created_at": "2026-05-30T00:38:50.033920+00:00",
+  "updated_at": "2026-05-30T02:01:12.731273+00:00"
+}

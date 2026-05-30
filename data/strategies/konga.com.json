@@ -1,0 +1,39 @@
+{
+  "domain": "konga.com",
+  "site_name": "Konga",
+  "strategy_type": "api",
+  "api": {
+    "endpoint": "https://www.konga.com/product/apple-iphone-16-pro-256gb-8gb-5g-titanium-black-6826677",
+    "method": "GET",
+    "req_headers": {},
+    "field_mapping": {
+      "title": [
+        "jsonld",
+        "title"
+      ],
+      "price": [
+        "jsonld",
+        "price"
+      ],
+      "rating": [
+        "jsonld",
+        "rating"
+      ],
+      "image_url": [
+        "jsonld",
+        "image_url"
+      ]
+    },
+    "_jsonld_fields": {
+      "title": "Iphone 16 Pro - 256GB - 8GB - 5g - Titanium Black",
+      "price": 1549990.0,
+      "rating": "0",
+      "image_url": "https://www-konga-com-res.cloudinary.com/f_auto,fl_lossy,dpr_auto,q_auto/media/catalog/product/D/M/187598_1756214332.jpg"
+    }
+  },
+  "sample_url": "https://www.konga.com/product/apple-iphone-16-pro-256gb-8gb-5g-titanium-black-6826677",
+  "success_count": 4,
+  "failure_count": 0,
+  "created_at": "2026-05-30T00:38:57.967336+00:00",
+  "updated_at": "2026-05-30T02:01:22.533156+00:00"
+}

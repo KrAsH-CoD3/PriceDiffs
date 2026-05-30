@@ -1,0 +1,39 @@
+{
+  "domain": "handmadeng.com",
+  "site_name": "Handmadeng",
+  "strategy_type": "api",
+  "api": {
+    "endpoint": "https://www.handmadeng.com/product/azure-tide-two-tone-mikado-boubou/",
+    "method": "GET",
+    "req_headers": {},
+    "field_mapping": {
+      "title": [
+        "jsonld",
+        "title"
+      ],
+      "price": [
+        "jsonld",
+        "price"
+      ],
+      "rating": [
+        "jsonld",
+        "rating"
+      ],
+      "image_url": [
+        "jsonld",
+        "image_url"
+      ]
+    },
+    "_jsonld_fields": {
+      "title": "Azure Tide Two-Tone Mikado Boubou",
+      "price": 38000.0,
+      "rating": "",
+      "image_url": "https://www.handmadeng.com/wp-content/uploads/2025/07/20250526_161511-1-scaled.jpg"
+    }
+  },
+  "sample_url": "https://www.handmadeng.com/product/azure-tide-two-tone-mikado-boubou/",
+  "success_count": 2,
+  "failure_count": 0,
+  "created_at": "2026-05-30T00:38:35.361454+00:00",
+  "updated_at": "2026-05-30T02:00:59.803378+00:00"
+}
