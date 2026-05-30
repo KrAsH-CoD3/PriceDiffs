@@ -347,3 +347,138 @@ def _drill_to_product(data):
             result = _drill_to_product(val)
             if result:
                 return result
+        for item in data:
+            result = _drill_to_product(item)
+            if result:
+                return result
+    return None
+
+
+# ── Phase 2b — API discovery ───────────────────────────────────────────
+
+def _discover_api_from_responses(domain: str, url: str,
+                                 responses: list) -> dict | None:
+    """Inspect captured network responses for product data APIs.
+
+    Follows forge skill's 'Fetch once, analyze many' rule.
+    """
+    candidates = []
+
+    for resp in responses:
+        body = resp.get("body", "")
+        if not _looks_like_product_json(body):
+            continue
+
+        mapping = _map_fields_from_json(body)
+        if not mapping or not mapping.get("title") or not mapping.get("price"):
+            continue
+
+        candidates.append({
+            "endpoint": resp["url"],
+            "method": resp["method"],
+            "req_headers": {
+                k: v for k, v in resp.get("request_headers", {}).items()
+                if k.lower() in (
+                    "accept", "content-type", "referer", "origin",
+                    "x-csrf-token", "authorization", "x-api-key",
+                    "x-requested-with",
+                )
+            },
+            "field_mapping": mapping,
+            "confidence": _score_mapping(mapping),
+        })
+
+    if not candidates:
+        return None
+
+    best = max(candidates, key=lambda c: c["confidence"])
+    return {
+        "domain": domain,
+        "site_name": domain.split(".")[0].capitalize(),
+        "strategy_type": "api",
+        "api": {
+            "endpoint": best["endpoint"],
+            "method": best["method"],
+            "req_headers": best["req_headers"],
+            "field_mapping": best["field_mapping"],
+        },
+        "sample_url": url,
+        "success_count": 0,
+        "failure_count": 0,
+    }
+
+
+def _looks_like_product_json(body: str) -> bool:
+    body = body.strip()
+    if not body.startswith(("{", "[")):
+        return False
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        return False
+    text = json.dumps(data).lower()
+    title_keys = ("title", "name", "product_name", "item_name", "heading")
+    price_keys = ("price", "sale_price", "regular_price", "current_price",
+                  "pricing", "amount", "cost")
+    return any(k in text for k in title_keys) and any(k in text for k in price_keys)
+
+
+def _map_fields_from_json(body: str) -> dict | None:
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, list) and data:
+        data = data[0]
+
+    mapping = {}
+    for field, keys in (
+        ("title", ("title", "name", "product_name", "item_name", "heading")),
+        ("price", ("price", "sale_price", "regular_price", "current_price", "amount")),
+        ("rating", ("rating", "average_rating", "review_rating", "star_rating")),
+        ("image_url", ("image", "images", "image_url", "thumbnail", "picture", "img")),
+    ):
+        path = _find_in_json(data, keys)
+        if path:
+            mapping[field] = _path_to_list(path)
+
+    if "title" in mapping and "price" in mapping:
+        return mapping
+    return None
+
+
+def _find_in_json(obj, keys: tuple, path: tuple = ()) -> tuple | None:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            kl = k.lower()
+            if any(key in kl or kl in key for key in keys):
+                if isinstance(v, (str, int, float)):
+                    return path + (k,)
+                if isinstance(v, dict):
+                    for ck in ("value", "amount", "raw", "display", "text", "current"):
+                        if ck in v:
+                            return path + (k, ck)
+                    fv = next((vk for vk in v.values()
+                               if isinstance(vk, (str, int, float))), None)
+                    if fv is not None:
+                        return path + (k, next(vk for vk, vv in v.items() if vv is fv))
+                    return path + (k,)
+            result = _find_in_json(v, keys, path + (k,))
+            if result:
+                return result
+    elif isinstance(obj, list):
+        for i, item in enumerate(obj):
+            result = _find_in_json(item, keys, path + (str(i),))
+            if result:
+                return result
+    return None
+
+
+def _path_to_list(path: tuple) -> list:
+    return list(path)
+
+
+def _score_mapping(mapping: dict) -> int:
+    score = 0
+    if mapping.get("title"):
+        score += 3
