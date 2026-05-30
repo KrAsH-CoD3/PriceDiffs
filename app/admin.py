@@ -4,7 +4,8 @@ from app.models import Product, PriceSnapshot
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ["id", "title", "url", "created_at"]
+    list_display = ["id", "user", "title", "url", "created_at"]
+    list_select_related = ["user"]
 
 
 @admin.register(PriceSnapshot)
