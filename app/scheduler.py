@@ -1,8 +1,6 @@
 import asyncio
 import os
 
-import httpx
-
 from app.strategy import (
     get_domain,
     load_strategy,
@@ -14,22 +12,29 @@ from app.strategy import (
     _close_browser,
 )
 
-API_BASE = "http://127.0.0.1:8000"
 SCRAPE_INTERVAL_SECONDS = int(os.environ.get("PRICEDIFF_SCRAPE_INTERVAL", "3600"))
 _loop_task: asyncio.Task | None = None
 _stop_event = asyncio.Event()
 
 
-async def scrape_all():
-    async with httpx.AsyncClient(base_url=API_BASE) as client:
-        resp = await client.get("/api/products")
-        products = resp.json()
+def _import_models():
+    import django
+    import os
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "pricediff.settings")
+    django.setup()
+    from app.models import Product, PriceSnapshot
+    return Product, PriceSnapshot
 
+
+async def scrape_all():
+    Product, PriceSnapshot = _import_models()
+
+    products = list(Product.objects.all())
     if not products:
         return
 
     for product in products:
-        url = product["url"]
+        url = product.url
         domain = get_domain(url)
         strategy = load_strategy(domain)
 
@@ -49,16 +54,16 @@ async def scrape_all():
             if not data:
                 continue
 
-        currency = data.get("currency", "NGN")
-        async with httpx.AsyncClient(base_url=API_BASE) as client:
-            await client.patch(f"/api/products/{product['id']}", json={
-                "title": data["title"],
-                "image_url": data["image_url"],
-                "rating": data["rating"],
-            })
-            await client.post(
-                f"/api/snapshots?product_id={product['id']}&price={data['price']}&currency={currency}"
-            )
+        product.title = data.get("title", product.title)
+        product.image_url = data.get("image_url", product.image_url)
+        product.rating = data.get("rating", product.rating)
+        product.save()
+
+        PriceSnapshot.objects.create(
+            product=product,
+            price=data.get("price", 0),
+            currency=data.get("currency", "NGN"),
+        )
 
 
 async def _run_loop():
