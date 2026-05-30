@@ -9,10 +9,22 @@
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     },
     "field_mapping": {
-      "title": ["jsonld", "title"],
-      "price": ["jsonld", "price"],
-      "rating": ["jsonld", "rating"],
-      "image_url": ["jsonld", "image_url"]
+      "title": [
+        "jsonld",
+        "title"
+      ],
+      "price": [
+        "jsonld",
+        "price"
+      ],
+      "rating": [
+        "jsonld",
+        "rating"
+      ],
+      "image_url": [
+        "jsonld",
+        "image_url"
+      ]
     },
     "_jsonld_fields": {
       "title": "Redmi G34WQ 2026 Curved Gaming Monitors",
@@ -23,6 +35,8 @@
     }
   },
   "sample_url": "https://www.jumia.com.ng/xiaomi-redmi-g34wq-2026-curved-gaming-monitors-419014126.html",
-  "success_count": 0,
-  "failure_count": 0
+  "success_count": 2,
+  "failure_count": 0,
+  "created_at": "2026-05-30T02:01:25.360156+00:00",
+  "updated_at": "2026-05-30T02:01:25.396769+00:00"
 }
