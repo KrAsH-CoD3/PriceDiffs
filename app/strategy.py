@@ -595,3 +595,164 @@ async def _discover_dom(domain: str, url: str, page) -> dict | None:
             "page_title": probe.get("_html_title", ""),
             "og_title": og_title,
             "og_image": og_image,
+        },
+        "sample_url": url,
+        "success_count": 0,
+        "failure_count": 0,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# EXTRACTION
+# ═══════════════════════════════════════════════════════════════════════
+
+def _get_field(data: dict | list, path: list):
+    current = data
+    for key in path:
+        if isinstance(current, dict):
+            current = current.get(key)
+        elif isinstance(current, list):
+            try:
+                idx = int(key)
+                current = current[idx] if 0 <= idx < len(current) else None
+            except (ValueError, IndexError):
+                return None
+        else:
+            return None
+        if current is None:
+            return None
+    return current
+
+
+async def extract_with_strategy(url: str, strategy: dict) -> dict | None:
+    strategy_type = strategy.get("strategy_type", "dom")
+    if strategy_type == "api":
+        return await _extract_via_api(url, strategy)
+    return await _extract_via_dom(url, strategy)
+
+
+async def _extract_via_api(url: str, strategy: dict) -> dict | None:
+    api = strategy.get("api", {})
+    endpoint = api.get("endpoint", "")
+    method = api.get("method", "GET").upper()
+    headers = api.get("req_headers", {})
+    mapping = api.get("field_mapping", {})
+
+    # Fast path: JSON-LD fields cached from discovery - only when URL matches sample
+    jsonld_fields = api.get("_jsonld_fields")
+    if jsonld_fields and url == strategy.get("sample_url", ""):
+        return {
+            "title": jsonld_fields.get("title", ""),
+            "price": float(jsonld_fields.get("price", 0)),
+            "rating": jsonld_fields.get("rating", ""),
+            "image_url": jsonld_fields.get("image_url", ""),
+        }
+
+    # JSON-LD strategy but different URL: re-extract from current page via HTTP
+    if jsonld_fields and url != strategy.get("sample_url", ""):
+        domain = get_domain(url)
+        result = await _try_jsonld_from_http(domain, url)
+        if result:
+            fields = result.get("api", {}).get("_jsonld_fields", {})
+            return {
+                "title": fields.get("title", ""),
+                "price": float(fields.get("price", 0)),
+                "rating": fields.get("rating", ""),
+                "image_url": fields.get("image_url", ""),
+            }
+        return None
+
+    try:
+        kwargs = {"proxy": PROXY_URL} if PROXY_URL else {}
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30, **kwargs) as client:
+            if method == "GET":
+                resp = await client.get(endpoint, headers=headers)
+            elif method == "POST":
+                resp = await client.post(endpoint, headers=headers)
+            else:
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception:
+        return None
+
+    result = {}
+    for field, path in mapping.items():
+        val = _get_field(data, path)
+        result[field] = str(val).strip() if val is not None else ""
+
+    price_val = 0.0
+    try:
+        cleaned = re.sub(r"[^\d.,]", "", result.get("price", "0").replace(",", "."))
+        cleaned = cleaned.replace(".", "", cleaned.count(".") - 1) if cleaned.count(".") > 1 else cleaned
+        price_val = float(cleaned) if cleaned else 0.0
+    except (ValueError, TypeError):
+        pass
+
+    return {
+        "title": result.get("title", ""),
+        "price": price_val,
+        "rating": result.get("rating", ""),
+        "image_url": result.get("image_url", ""),
+    }
+
+
+async def _extract_via_dom(url: str, strategy: dict) -> dict | None:
+    browser = await _get_browser()
+    page = await browser.new_page()
+
+    selectors = strategy.get("dom", {}).get("selectors", {})
+    js = _build_dom_extract_js(selectors)
+
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        await page.wait_for_timeout(2000)
+        raw = await page.evaluate(js)
+    except Exception:
+        return None
+    finally:
+        await page.close()
+
+    if not raw or not raw.startswith("{"):
+        return None
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+    price_val = 0.0
+    try:
+        price_str = (result.get("price") or "0").replace(",", "")
+        price_val = float(price_str) if price_str else 0.0
+    except (ValueError, TypeError):
+        pass
+
+    return {
+        "title": (result.get("title") or "").strip(),
+        "price": price_val,
+        "rating": (result.get("rating") or "").strip(),
+        "image_url": (result.get("image_url") or "").strip(),
+    }
+
+
+def _build_dom_extract_js(selectors: dict) -> str:
+    parts = []
+    var_map = {
+        "title": ("$t", "title", False),
+        "price": ("$p", "priceText", False),
+        "rating": ("$r", "ratingText", False),
+        "image": ("$i", "imageSrc", True),
+    }
+    for field, (sv, rv, is_attr) in var_map.items():
+        info = selectors.get(field, {})
+        css = info.get("css") or (info if isinstance(info, str) else "")
+        if css:
+            safe_css = css.replace("'", "\\'")
+            parts.append(f"const {sv} = document.querySelector('{safe_css}')")
+            if is_attr:
+                parts.append(
+                    f"""{rv} = ({sv} ? ({sv}.getAttribute('src')||{sv}.getAttribute('data-src')||{sv}.getAttribute('content')||'') : '')""")
+            else:
+                parts.append(
+                    f"{rv} = ({sv} ? ({sv}.textContent||{sv}.innerText||'').trim() : '')")
+        else:
