@@ -5,6 +5,7 @@ from app import views
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("add", views.add_page, name="add_page"),
+    path("product/<int:product_id>", views.product_page, name="product_page"),
     path("login", views.login_page, name="login_page"),
     path("register", views.register_page, name="register_page"),
     path("api/auth/register", views.register_view, name="auth_register"),

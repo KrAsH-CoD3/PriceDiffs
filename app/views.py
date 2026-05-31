@@ -1,4 +1,3 @@
-import asyncio
 from django.contrib.auth import authenticate
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
@@ -15,7 +14,7 @@ from app.serializers import (
     ProductDetailSerializer,
     PriceSnapshotSerializer,
 )
-from app.strategy import scrape_url, _close_browser
+from app.tasks import scrape_product
 
 
 def _jwt_response(user):
@@ -35,6 +34,10 @@ def dashboard(request):
 
 def add_page(request):
     return render(request, "add.html")
+
+
+def product_page(request, product_id):
+    return render(request, "product.html", {"product_id": product_id})
 
 
 def login_page(request):
@@ -90,21 +93,7 @@ def products_view(request):
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     product = serializer.save(user=request.user)
-
-    data = asyncio.run(scrape_url(product.url))
-    if data:
-        product.title = data.get("title", product.title)
-        product.image_url = data.get("image_url", product.image_url)
-        product.rating = data.get("rating", product.rating)
-        product.save(update_fields=["title", "image_url", "rating"])
-        PriceSnapshot.objects.create(
-            product=product,
-            price=data.get("price", 0),
-            currency=data.get("currency", "NGN"),
-        )
-
-    asyncio.run(_close_browser())
-
+    scrape_product.delay(product.id)
     return Response(ProductSerializer(product).data, status=status.HTTP_201_CREATED)
 
 
