@@ -12,7 +12,7 @@ import json
 import os
 import re
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from playwright.async_api import async_playwright
@@ -281,11 +281,20 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
         else:
             price = float(price_raw)
         image = product.get("image", "")
-        if isinstance(image, dict) and image.get("@type") == "ImageObject":
-            urls = image.get("contentUrl", image.get("url", ""))
-            image = urls[0] if isinstance(urls, list) else urls
+        if isinstance(image, dict):
+            if image.get("@type") == "ImageObject":
+                image = image.get("contentUrl") or image.get("url") or image.get("@id") or ""
+            else:
+                image = image.get("url") or image.get("contentUrl") or image.get("@id") or ""
         if isinstance(image, list):
             image = image[0] if image else ""
+        if isinstance(image, dict):
+            image = image.get("contentUrl") or image.get("url") or image.get("@id") or ""
+        if isinstance(image, str) and image:
+            if not urlparse(image).netloc:
+                image = urljoin(url, image)
+            if "#" in image:
+                image = image.split("#")[0]
         rating_obj = product.get("aggregateRating", {})
         if isinstance(rating_obj, list):
             rating_obj = rating_obj[0] if rating_obj else {}
