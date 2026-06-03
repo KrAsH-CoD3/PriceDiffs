@@ -94,7 +94,6 @@ async def _get_browser():
             "args": ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
         }
         if PROXY_URL:
-            from urllib.parse import urlparse
             parsed = urlparse(PROXY_URL)
             proxy_config = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
             if parsed.username:
@@ -105,6 +104,12 @@ async def _get_browser():
         _browser_instance = await _playwright_instance.chromium.launch(**launch_kwargs)
         return _browser_instance
     except Exception:
+        if _playwright_instance:
+            try:
+                await _playwright_instance.stop()
+            except Exception:
+                pass
+            _playwright_instance = None
         _browser_instance = None
         return None
 
