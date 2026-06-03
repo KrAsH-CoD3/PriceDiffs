@@ -70,3 +70,4 @@ async def stop():
         except (asyncio.CancelledError, Exception):
             pass
     await _close_browser()
+    await asyncio.sleep(0)
