@@ -3,6 +3,7 @@ Forge methodology — JSON-LD first, network API second, DOM fallback.
 Powered by CloakBrowser (stealth Chromium).
 
 Phase 1 — Direct HTTP probe for embedded JSON-LD (no browser)
+Phase 1b — Direct HTML extraction from OG/title/price patterns (no browser)
 Phase 2 — Open browser, capture network traffic for API discovery
 Phase 3 — DOM CSS probe fallback
 Phase 4 — Strategy verification and persistence
@@ -136,13 +137,14 @@ async def _close_browser():
 # ═══════════════════════════════════════════════════════════════════════
 
 async def forge_strategy(url: str) -> dict | None:
-    """Full Phase 2 → Phase 3 workflow powered by CloakBrowser.
+    """Full discovery workflow.
 
     1. Probe page with direct HTTP for embedded JSON-LD (fast path)
-    2. Open page with CloakBrowser, capture network traffic
-    3. Inspect XHR/fetch responses for product data APIs
-    4. If no API → DOM probe → save DOM strategy
-    5. Verify strategy works before returning
+    2. Direct HTML extraction via OG tags / price patterns (no browser)
+    3. Open page with CloakBrowser, capture network traffic
+    4. Inspect XHR/fetch responses for product data APIs
+    5. If no API → DOM probe → save DOM strategy
+    6. Verify strategy works before returning
     """
     domain = get_domain(url)
 
@@ -153,7 +155,16 @@ async def forge_strategy(url: str) -> dict | None:
         _save_meta(strategy)
         return strategy
 
-    # ── Phase 2b: Browser-based exploration ──────────────────────────
+    # ── Phase 2b: Direct HTML extraction (Cloudflare-safe fallback) ──
+    # For sites where JSON-LD is absent but product data lives in OG tags,
+    # heading elements, or structured HTML patterns.  No browser needed.
+    strategy = await _try_html_extraction(domain, url)
+    if strategy:
+        print(f"  [forge] HTML extraction strategy found for {domain}")
+        _save_meta(strategy)
+        return strategy
+
+    # ── Phase 2c: Browser-based exploration ──────────────────────────
     browser = await _get_browser()
     if not browser:
         print(f"  [forge] Browser unavailable, skipping {domain}")
@@ -181,7 +192,7 @@ async def forge_strategy(url: str) -> dict | None:
         await page.close()
         return None
 
-    # ── Phase 2c: API endpoint discovery ─────────────────────────────
+    # ── Phase 2d: API endpoint discovery ─────────────────────────────
     strategy = _discover_api_from_responses(domain, url, responses)
     if strategy:
         print(f"  [forge] API strategy found for {domain}, verifying...")
@@ -199,7 +210,7 @@ async def forge_strategy(url: str) -> dict | None:
             await page.close()
             return None
 
-    # ── Phase 2d: DOM fallback — probe CSS selectors ─────────────────
+    # ── Phase 2e: DOM fallback — probe CSS selectors ─────────────────
     print(f"  [forge] Probing DOM selectors for {domain}...")
     strategy = await _discover_dom(domain, url, page)
     await page.close()
@@ -325,6 +336,119 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
             "failure_count": 0,
         }
     return None
+
+
+# ── Phase 1b — Direct HTML extraction (Cloudflare-safe no-browser fallback) ──
+
+async def _try_html_extraction(domain: str, url: str) -> dict | None:
+    """Extract product data from raw HTML using OG tags, headings, and price patterns.
+
+    Works on Cloudflare-protected sites where the browser crashes but httpx
+    successfully fetches the HTML.  No browser needed.
+    """
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+            resp = await client.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            })
+            resp.raise_for_status()
+            html = resp.text
+    except Exception:
+        return None
+
+    if not html or len(html) < 500:
+        return None
+
+    # Title: og:title > h1 > <title>
+    title = ""
+    og_m = re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"', html)
+    if og_m:
+        title = og_m.group(1)
+    if not title:
+        h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.DOTALL)
+        if h1_m:
+            title = re.sub(r'<[^>]+>', '', h1_m.group(1)).strip()
+    if not title:
+        t_m = re.search(r'<title[^>]*>(.*?)</title>', html, re.DOTALL)
+        if t_m:
+            title = re.sub(r'<[^>]+>', '', t_m.group(1)).strip()
+    title = title.replace("&#x20;", " ").replace("&amp;", "&").strip()[:120]
+
+    if not title or "whoops" in title.lower() or "404" in title.lower() or len(title) < 3:
+        return None
+
+    # Price: og:price > structured price patterns
+    price = None
+    og_p = re.search(r'<meta[^>]+property="product:price:amount"[^>]+content="([^"]+)"', html)
+    if og_p:
+        try:
+            price = float(og_p.group(1).replace(",", ""))
+        except ValueError:
+            price = None
+
+    if not price:
+        _patterns = [
+            (r'[\u20a6]\s*([0-9,]+(?:\.[0-9]{1,2})?)', 1),
+            (r'NGN[\s:]*([0-9,]+(?:\.[0-9]{1,2})?)', 1),
+            (r'twitter:data1"\s+value="(?:[A-Z]{3}\s+)?([0-9,]+(?:\.[0-9]{1,2})?)"\s*/?', 1),
+            (r'[Pp]rice[^<]{0,40}?([0-9,]+(?:\.[0-9]{1,2})?)', 1),
+            (r'"(?:price|Price|amount)"\s*:\s*"(?:[A-Z]{3}\s+)?([0-9,]+(?:\.[0-9]{1,2})?)"', 1),
+            (r'"(?:price|Price)"\s*:\s*([0-9.]+)', 1),
+        ]
+        for pat, group in _patterns:
+            m = re.search(pat, html)
+            if m:
+                try:
+                    candidate = float(m.group(group).replace(",", ""))
+                    if 100 < candidate < 100_000_000:
+                        price = candidate
+                        break
+                except (ValueError, IndexError):
+                    pass
+
+    if not price:
+        return None
+
+    # Currency detection
+    currency = "NGN"
+    if "₦" not in html[:5000] and "NGN" not in html[:5000]:
+        if "$" in html[:5000]:
+            currency = "USD"
+        elif "€" in html[:5000]:
+            currency = "EUR"
+        elif "£" in html[:5000]:
+            currency = "GBP"
+
+    # Image: og:image
+    image = ""
+    og_img = re.search(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', html)
+    if og_img:
+        image = og_img.group(1)
+
+    return {
+        "domain": domain,
+        "site_name": domain.split(".")[0].capitalize(),
+        "strategy_type": "api",
+        "api": {
+            "endpoint": url,
+            "method": "GET",
+            "req_headers": {},
+            "field_mapping": {
+                k: ["jsonld", k]
+                for k in ("title", "price", "rating", "image_url")
+            },
+            "_jsonld_fields": {
+                "title": title,
+                "price": price,
+                "rating": "",
+                "image_url": image,
+                "currency": currency,
+            },
+        },
+        "sample_url": url,
+        "success_count": 0,
+        "failure_count": 0,
+    }
 
 
 def _drill_to_product(data):
@@ -653,6 +777,18 @@ async def _extract_via_api(url: str, strategy: dict) -> dict | None:
                 "image_url": fields.get("image_url", ""),
                 "currency": fields.get("currency", "NGN"),
             }
+        # HTML extraction fallback — catches Cloudflare-protected sites
+        # where the browser is unavailable but httpx can fetch HTML.
+        result = await _try_html_extraction(domain, url)
+        if result:
+            fields = result.get("api", {}).get("_jsonld_fields", {})
+            return {
+                "title": fields.get("title", ""),
+                "price": float(fields.get("price", 0)),
+                "rating": fields.get("rating", ""),
+                "image_url": fields.get("image_url", ""),
+                "currency": fields.get("currency", "NGN"),
+            }
         return None
 
     try:
@@ -802,6 +938,17 @@ async def scrape_url(url: str) -> dict | None:
 
     strategy = await forge_strategy(url)
     if not strategy:
+        # Phase 5 — Direct HTML extraction (Cloudflare-safe fallback, no strategy persisted)
+        data = await _try_html_extraction(domain, url)
+        if data:
+            fields = data.get("api", {}).get("_jsonld_fields", {})
+            return {
+                "title": fields.get("title", ""),
+                "price": float(fields.get("price", 0)),
+                "rating": fields.get("rating", ""),
+                "image_url": fields.get("image_url", ""),
+                "currency": fields.get("currency", "NGN"),
+            }
         return None
     mark_success(strategy)
     return await extract_with_strategy(url, strategy)
