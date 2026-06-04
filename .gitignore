@@ -19,3 +19,7 @@ data/*.db
 
 # VS Code (shared via code-server)
 .vscode/
+
+.claude
+CLAUDE.md
+AGENTSmd
