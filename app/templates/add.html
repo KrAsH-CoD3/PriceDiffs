@@ -57,7 +57,7 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Scraping...';
+      submitBtn.textContent = 'Adding...';
       submitBtn.classList.remove('hover:bg-blue-700');
       const url = e.target.url.value;
       const res = await api('/api/products', {

@@ -1,0 +1,40 @@
+{
+  "domain": "obiwezy.com",
+  "site_name": "Obiwezy",
+  "strategy_type": "api",
+  "api": {
+    "endpoint": "https://obiwezy.com/apple-iphone-16-pro-single-sim-256gb-natural-titanium-brand-new-4549995532814.html",
+    "method": "GET",
+    "req_headers": {},
+    "field_mapping": {
+      "title": [
+        "jsonld",
+        "title"
+      ],
+      "price": [
+        "jsonld",
+        "price"
+      ],
+      "rating": [
+        "jsonld",
+        "rating"
+      ],
+      "image_url": [
+        "jsonld",
+        "image_url"
+      ]
+    },
+    "_jsonld_fields": {
+      "title": "Apple iPhone 16 Pro Single Sim 256GB Natural Titanium &#x28;Brand New&#x29;",
+      "price": 1750000.0,
+      "rating": "",
+      "image_url": "https://obiwezy.com/media/catalog/product/cache/2c3d1f94017d63e0715df8eea8a792b4/i/p/iphone-16-pro-natural-titanium_3.jpeg",
+      "currency": "NGN"
+    }
+  },
+  "sample_url": "https://obiwezy.com/apple-iphone-16-pro-single-sim-256gb-natural-titanium-brand-new-4549995532814.html",
+  "success_count": 1,
+  "failure_count": 0,
+  "created_at": "2026-06-03T01:50:11.851702+00:00",
+  "updated_at": "2026-06-03T01:50:31.099428+00:00"
+}

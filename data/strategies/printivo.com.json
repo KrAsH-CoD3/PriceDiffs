@@ -1,0 +1,40 @@
+{
+  "domain": "printivo.com",
+  "site_name": "Printivo",
+  "strategy_type": "api",
+  "api": {
+    "endpoint": "https://printivo.com/product/one-sided-business-cards",
+    "method": "GET",
+    "req_headers": {},
+    "field_mapping": {
+      "title": [
+        "jsonld",
+        "title"
+      ],
+      "price": [
+        "jsonld",
+        "price"
+      ],
+      "rating": [
+        "jsonld",
+        "rating"
+      ],
+      "image_url": [
+        "jsonld",
+        "image_url"
+      ]
+    },
+    "_jsonld_fields": {
+      "title": "Design & Order Proffesional One-Sided Business Cards | Printivo.com",
+      "price": 11000.0,
+      "rating": "",
+      "image_url": "https://printivo.s3-us-west-2.amazonaws.com/files/category_thumbnails/1593737703_business-card.png",
+      "currency": "NGN"
+    }
+  },
+  "sample_url": "https://printivo.com/product/one-sided-business-cards",
+  "success_count": 1,
+  "failure_count": 0,
+  "created_at": "2026-06-03T01:50:42.559646+00:00",
+  "updated_at": "2026-06-03T01:50:42.559884+00:00"
+}

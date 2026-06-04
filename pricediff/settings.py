@@ -1,16 +1,24 @@
+import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = "django-insecure-pricediff-dev-key-change-in-production"
+_secret = os.environ.get("SECRET_KEY", "")
+if not _secret or _secret == "django-insecure-pricediff-dev-key-change-in-production":
+    raise RuntimeError(
+        "SECRET_KEY must be set to a unique, unpredictable value. "
+        "Set it in .env or the environment."
+    )
+SECRET_KEY = _secret
 
 DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://e341-141-147-64-176.ngrok-free.app",
-    "https://*.trycloudflare.com",
+    o.strip() for o in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
 ]
 
 INSTALLED_APPS = [
@@ -79,6 +87,8 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
+
+CELERY_broker_url = os.environ.get("CELERY_BROKER_URL", "")
 
 STATIC_URL = "static/"
 

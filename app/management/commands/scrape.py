@@ -43,4 +43,5 @@ class Command(BaseCommand):
             self.stdout.write(f"  Price: {symbol}{data.get('price', 0):.2f}")
 
         await _close_browser()
+        await asyncio.sleep(0)
         self.stdout.write("\nDone.")

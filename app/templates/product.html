@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title id="pageTitle">Product — PriceDiffs</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="max-w-4xl mx-auto p-6">
+    <header class="flex items-center justify-between mb-8">
+      <div>
+        <a href="/" class="text-blue-600 text-sm">&larr; Dashboard</a>
+        <h1 id="productTitle" class="text-2xl font-bold mt-2">Loading...</h1>
+      </div>
+      <div class="flex items-center gap-3">
+        <span id="username" class="text-sm text-gray-500"></span>
+        <button id="logoutBtn" class="text-sm text-gray-500 hover:text-red-600 hidden">Logout</button>
+      </div>
+    </header>
+
+    <div id="content" class="space-y-6">
+      <div class="text-center py-12 text-gray-400">Loading...</div>
+    </div>
+  </div>
+
+  <script>
+    const ACCESS = localStorage.getItem('access');
+    const PRODUCT_ID = {{ product_id }};
+
+    async function api(path, options = {}) {
+      const headers = { ...options.headers };
+      if (ACCESS) headers['Authorization'] = `Bearer ${ACCESS}`;
+      if (options.body && !(options.body instanceof FormData)) {
+        headers['Content-Type'] = 'application/json';
+      }
+      return fetch(path, { ...options, headers });
+    }
+
+    async function checkAuth() {
+      if (!ACCESS) {
+        window.location.href = '/login';
+        return;
+      }
+      const res = await api('/api/auth/me');
+      if (!res.ok) {
+        localStorage.removeItem('access');
+        localStorage.removeItem('refresh');
+        window.location.href = '/login';
+        return;
+      }
+      const text = await res.text();
+      let user;
+      try { user = JSON.parse(text); } catch(e) {
+        document.getElementById('content').innerHTML =
+          `<div class="col-span-full text-center py-12 text-red-400">Auth error.</div>`;
+        return;
+      }
+      document.getElementById('username').textContent = user.username;
+      document.getElementById('logoutBtn').classList.remove('hidden');
+    }
+
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      localStorage.removeItem('access');
+      localStorage.removeItem('refresh');
+      window.location.href = '/login';
+    });
+
+    function currencySymbol(currency) {
+      return currency === 'NGN' ? '\u20A6' : '$';
+    }
+
+    function formatPrice(num) {
+      return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    async function loadProduct() {
+      try {
+        const res = await api(`/api/products/${PRODUCT_ID}`);
+        const text = await res.text();
+        if (!res.ok) {
+          document.getElementById('content').innerHTML =
+            `<div class="text-center py-12 text-red-400">Product not found.</div>`;
+          return;
+        }
+        const p = JSON.parse(text);
+        const snapshots = p.snapshots || [];
+        const latest = snapshots.length > 0 ? snapshots[0] : null;
+        const sym = latest ? currencySymbol(latest.currency) : '$';
+
+        document.getElementById('pageTitle').textContent = (p.title || 'Product') + ' — PriceDiffs';
+        document.getElementById('productTitle').textContent = p.title || 'Untitled';
+
+        let html = '';
+
+        // Product info card
+        html += `
+          <div class="bg-white rounded-xl shadow-sm border p-6 flex flex-col sm:flex-row gap-6">
+            ${p.image_url ? `<img src="${p.image_url}" class="w-40 h-40 object-contain rounded-lg shrink-0" />` : ''}
+            <div class="flex-1 min-w-0">
+              <a href="${p.url}" target="_blank" class="text-blue-600 text-sm hover:underline block mb-2 truncate">${p.url}</a>
+              ${p.rating ? `<span class="text-yellow-500 text-sm">★ ${p.rating}</span>` : ''}
+              <div class="mt-4 text-3xl font-bold">
+                ${latest ? `${sym}${formatPrice(latest.price)}` : '<span class="text-gray-400 text-lg">Not scraped yet</span>'}
+              </div>
+              <div class="mt-1 text-sm text-gray-500">
+                ${p.price_change_24h !== null ? `
+                  <span class="${p.price_change_24h < 0 ? 'text-green-600' : p.price_change_24h > 0 ? 'text-red-600' : ''}">
+                    ${p.price_change_24h > 0 ? '▲' : p.price_change_24h < 0 ? '▼' : ''}
+                    ${sym}${formatPrice(Math.abs(p.price_change_24h))} (24h)
+                  </span>
+                ` : ''}
+              </div>
+              <div class="mt-2 text-sm text-gray-500">
+                ${p.lowest_price !== null ? `Low: ${sym}${formatPrice(p.lowest_price)}` : ''}
+                ${p.highest_price !== null ? ` · High: ${sym}${formatPrice(p.highest_price)}` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+
+        // Price chart (mini bar chart of all snapshots)
+        if (snapshots.length > 0) {
+          const sorted = [...snapshots].reverse(); // chronological
+          const highs = sorted.map(s => s.price);
+          const maxP = Math.max(...highs);
+          const minP = Math.min(...highs);
+          const range = maxP - minP || 1;
+
+          html += `
+            <div class="bg-white rounded-xl shadow-sm border p-6">
+              <h2 class="text-lg font-semibold mb-4">Price History</h2>
+              <div class="h-40 flex items-end gap-[3px]">
+                ${sorted.map(sp => {
+                  const pct = (sp.price - minP) / range;
+                  const spSym = currencySymbol(sp.currency);
+                  return `<div class="flex-1 bg-blue-500 rounded-t hover:bg-blue-600 relative group" style="height:${Math.max(6, pct * 100)}%" title="${spSym}${formatPrice(sp.price)} — ${new Date(sp.scraped_at).toLocaleDateString()}">
+                    <div class="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none z-10">
+                      ${spSym}${formatPrice(sp.price)}<br>${new Date(sp.scraped_at).toLocaleDateString()}
+                    </div>
+                  </div>`;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }
+
+        // Snapshot table
+        if (snapshots.length > 0) {
+          html += `
+            <div class="bg-white rounded-xl shadow-sm border p-6">
+              <h2 class="text-lg font-semibold mb-4">All Snapshots (${snapshots.length})</h2>
+              <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="text-left text-gray-500 border-b">
+                      <th class="pb-2 pr-4">Date</th>
+                      <th class="pb-2 pr-4">Price</th>
+                      <th class="pb-2">Currency</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${snapshots.map(sp => `
+                      <tr class="border-b last:border-0">
+                        <td class="py-2 pr-4 text-gray-600">${new Date(sp.scraped_at).toLocaleString()}</td>
+                        <td class="py-2 pr-4 font-medium">${currencySymbol(sp.currency)}${formatPrice(sp.price)}</td>
+                        <td class="py-2 text-gray-500">${sp.currency}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `;
+        } else {
+          html += `
+            <div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400">
+              <p class="mb-2">This product hasn't been scraped yet.</p>
+              <p class="text-sm">A Celery worker is needed to process the scrape. Start one with:</p>
+              <code class="block mt-2 text-xs bg-gray-100 p-2 rounded">.venv/bin/celery -A pricediff worker --loglevel=info</code>
+            </div>
+          `;
+        }
+
+        // Action buttons
+        html += `
+          <div class="flex gap-3">
+            <button id="deleteBtn" class="bg-red-600 text-white px-5 py-2 rounded-lg text-sm hover:bg-red-700">Delete Product</button>
+          </div>
+        `;
+
+        document.getElementById('content').innerHTML = html;
+
+        // Attach delete handler
+        document.getElementById('deleteBtn').addEventListener('click', async () => {
+          if (!confirm('Delete this product and all its snapshots?')) return;
+          const delRes = await api(`/api/products/${PRODUCT_ID}`, { method: 'DELETE' });
+          if (delRes.ok || delRes.status === 204) {
+            window.location.href = '/';
+          } else {
+            alert('Failed to delete product');
+          }
+        });
+
+      } catch (e) {
+        document.getElementById('content').innerHTML =
+          `<div class="text-center py-12 text-red-400">Error: ${e.message}</div>`;
+      }
+    }
+
+    checkAuth().then(loadProduct);
+  </script>
+</body>
+</html>

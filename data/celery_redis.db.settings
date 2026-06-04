@@ -1,0 +1,1 @@
+{"pidfile": "/tmp/tmplcl36myy/redis.pid", "unixsocket": "/tmp/tmplcl36myy/redis.socket", "dbdir": "/home/test/pricediff/data", "dbfilename": "celery_redis.db"}

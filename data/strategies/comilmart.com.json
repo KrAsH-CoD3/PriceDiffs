@@ -1,0 +1,40 @@
+{
+  "domain": "comilmart.com",
+  "site_name": "Comilmart",
+  "strategy_type": "api",
+  "api": {
+    "endpoint": "https://comilmart.com/product/mgo-970-umf-22-manuka-honey-250g-premium-new-zealand-certified/",
+    "method": "GET",
+    "req_headers": {},
+    "field_mapping": {
+      "title": [
+        "jsonld",
+        "title"
+      ],
+      "price": [
+        "jsonld",
+        "price"
+      ],
+      "rating": [
+        "jsonld",
+        "rating"
+      ],
+      "image_url": [
+        "jsonld",
+        "image_url"
+      ]
+    },
+    "_jsonld_fields": {
+      "title": "MGO 970+ UMF 22+ Manuka Honey 250g - Premium New Zealand Certified - Comilmart",
+      "price": 225.0,
+      "rating": "",
+      "image_url": "",
+      "currency": "USD"
+    }
+  },
+  "sample_url": "https://comilmart.com/product/mgo-970-umf-22-manuka-honey-250g-premium-new-zealand-certified/",
+  "success_count": 3,
+  "failure_count": 0,
+  "created_at": "2026-06-02T09:12:31.301958+00:00",
+  "updated_at": "2026-06-02T09:46:21.367202+00:00"
+}

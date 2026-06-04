@@ -5,12 +5,16 @@ description = "Price tracking dashboard"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "celery>=5.6.3",
     "cloakbrowser>=0.3.31",
+    "python-dotenv>=1.0.0",
     "django>=6.0.5",
     "djangorestframework>=3.16.0",
     "djangorestframework-simplejwt>=5.5.0",
     "httpx>=0.28.1",
     "playwright>=1.60.0",
+    "redis<8.0",
+    "redislite>=6.2.912183",
 ]
 
 [tool.django]
