@@ -13,7 +13,7 @@ if not _secret or _secret == "django-insecure-pricediff-dev-key-change-in-produc
     )
 SECRET_KEY = _secret
 
-DEBUG = True
+DEBUG = os.environ.get("DEBUG", "").lower() in ("1", "true", "yes")
 
 ALLOWED_HOSTS = ["*"]
 
