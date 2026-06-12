@@ -1,365 +1,187 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PriceDiffs</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    .status-area .fade-in { animation: fadeSlideIn 0.4s ease-out; }
-    @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-  </style>
-</head>
-<body class="bg-gray-50 text-gray-900">
-  <div class="max-w-6xl mx-auto p-6">
-    <header class="flex items-center justify-between mb-8">
-      <h1 class="text-3xl font-bold tracking-tight">PriceDiffs</h1>
-      <div class="flex items-center gap-3">
-        <span id="username" class="text-sm text-gray-500"></span>
-        <a href="/add" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700">+ Add Product</a>
-        <button id="logoutBtn" class="text-sm text-gray-500 hover:text-red-600 hidden">Logout</button>
-      </div>
-    </header>
+{% extends "base.html" %}
 
-    <div id="products" class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-      <div class="col-span-full text-center py-12 text-gray-400">Loading...</div>
-    </div>
+{% block title %}Dashboard — PriceDiffs{% endblock %}
+
+{% block nav_left %}
+<div class="flex items-center gap-3">
+  <a href="/" class="text-lg font-bold tracking-tight text-slate-100">PriceDiffs</a>
+  <span class="text-xs text-slate-600">/</span>
+  <span class="text-sm text-slate-400 font-medium">Products</span>
+</div>
+{% endblock %}
+
+{% block nav_right %}
+<span class="inline-flex items-center gap-2.5">
+  <span class="avatar">{{ user.username|slice:":1"|upper }}</span>
+  <span class="text-sm text-white font-semibold">{{ user.username|capfirst }}</span>
+</span>
+<a href="/add" class="text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600/50 px-4 py-2 rounded-full transition-colors inline-flex items-center gap-1.5">
+  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+  Track new
+</a>
+<a href="/logout" class="text-sm text-slate-400 hover:text-rose-400 border border-slate-700/50 hover:border-rose-400/30 px-4 py-2 rounded-full transition-colors">Sign out</a>
+{% endblock %}
+
+{% block extra_style %}
+    @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeSlideIn 0.35s ease-out; }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto px-6 pb-12">
+  <div class="flex items-baseline justify-between mb-8 pt-6">
+    <h1 class="text-xl font-bold text-slate-100">Products</h1>
+    <span id="productCount" class="text-xs text-slate-500 font-medium"></span>
   </div>
+  <div id="products" class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div class="col-span-full text-center py-16 text-sm text-slate-500">Loading...</div>
+  </div>
+</div>
+{% endblock %}
 
-  <script>
-    const ACCESS = localStorage.getItem('access');
+{% block extra_scripts %}
+<script>
+  const ACCESS = localStorage.getItem('access');
+  async function api(path, options = {}) {
+    const headers = { ...options.headers };
+    if (ACCESS) headers['Authorization'] = 'Bearer ' + ACCESS;
+    if (options.body && !(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+    return fetch(path, { ...options, headers });
+  }
+  (async () => {
+    if (!ACCESS) { window.location.href = '/login'; return; }
+    const res = await api('/api/auth/me');
+    if (!res.ok) { localStorage.removeItem('access'); localStorage.removeItem('refresh'); window.location.href = '/login'; return; }
+    loadProducts();
+  })();
 
-    async function api(path, options = {}) {
-      const headers = { ...options.headers };
-      if (ACCESS) headers['Authorization'] = `Bearer ${ACCESS}`;
-      if (options.body && !(options.body instanceof FormData)) {
-        headers['Content-Type'] = 'application/json';
-      }
-      return fetch(path, { ...options, headers });
-    }
-
-    async function checkAuth() {
-      if (!ACCESS) {
-        window.location.href = '/login';
-        return;
-      }
-      const res = await api('/api/auth/me');
-      if (!res.ok) {
-        localStorage.removeItem('access');
-        localStorage.removeItem('refresh');
-        window.location.href = '/login';
-        return;
-      }
-      const text = await res.text();
-      let user;
-      try { user = JSON.parse(text); } catch(e) {
-        document.getElementById('products').innerHTML =
-          `<div class="col-span-full text-center py-12 text-red-400">Auth endpoint returned HTML instead of JSON. Check console.</div>`;
-        console.error('Auth response was HTML:', text.slice(0, 200));
-        return;
-      }
-      document.getElementById('username').textContent = user.username;
-      document.getElementById('logoutBtn').classList.remove('hidden');
-    }
-
-    document.getElementById('logoutBtn').addEventListener('click', async () => {
-      localStorage.removeItem('access');
-      localStorage.removeItem('refresh');
-      window.location.href = '/login';
-    });
-
-    async function loadProducts() {
-      try {
+  async function loadProducts() {
+    try {
       const res = await api('/api/products');
-      const bodyText = await res.text();
-      if (!res.ok) {
-        document.getElementById('products').innerHTML = `<div class="col-span-full text-center py-12 text-red-400">API error: ${res.status} — ${bodyText.slice(0, 100)}</div>`;
-        return;
-      }
-      const products = JSON.parse(bodyText);
+      const products = await res.json();
       const container = document.getElementById('products');
-
-      if (!Array.isArray(products)) {
-        container.innerHTML = `<div class="col-span-full text-center py-12 text-red-400">Unexpected response format</div>`;
-        return;
-      }
-
+      if (!Array.isArray(products)) { container.innerHTML = '<div class="col-span-full text-center py-16 text-sm text-slate-500">Unexpected response</div>'; return; }
+      document.getElementById('productCount').textContent = products.length + ' tracked';
       if (products.length === 0) {
-        container.innerHTML = `<div class="col-span-full text-center py-12 text-gray-400">No products tracked yet. <a href="/add" class="text-blue-600 underline">Add one</a></div>`;
+        container.innerHTML = '<div class="col-span-full text-center py-16 text-sm text-slate-500">Nothing tracked yet. <a href="/add" class="text-emerald-400 underline underline-offset-2">Add your first product</a></div>';
         return;
       }
+      function sym(c) { return c === 'NGN' ? '\u20A6' : '$'; }
+      function fp(n) { return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
-      function currencySymbol(currency) {
-        return currency === 'NGN' ? '\u20A6' : '$';
-      }
-
-      function formatPrice(num) {
-        return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      }
-
-      const cards = products.map((p) => {
-        const sym = p.last_currency === 'NGN' ? '\u20A6' : '$';
-        const change = p.price_change_24h;
-        const changeColor = change === null ? '' : change < 0 ? 'text-green-600' : change > 0 ? 'text-red-600' : '';
-
-        const defaultTitle = new URL(p.url).hostname.replace(/^www\./, '');
-        const useTitle = p.title || defaultTitle;
-        return `
-          <div class="bg-white rounded-xl shadow-sm border p-4 flex flex-col relative" data-id="${p.id}">
-            <div class="flex gap-4">
-              ${p.image_url
-                ? `<img src="${p.image_url}" referrerpolicy="no-referrer" class="w-20 h-20 object-contain rounded" />`
-                : `<div class="w-20 h-20 bg-gray-200 rounded animate-pulse shrink-0"></div>`}
-              <div class="flex-1 min-w-0">
-                <a href="/product/${p.id}" class="font-semibold truncate block hover:text-blue-600" title="${useTitle}">${useTitle}</a>
-                <div class="flex items-center gap-2 text-xs mt-0.5">
-                  ${p.rating ? `<span class="text-yellow-500">★ ${p.rating}</span>` : ''}
-                  <span class="text-gray-400">${defaultTitle}</span>
-                </div>
-              </div>
-              <button class="delete-btn text-gray-400 hover:text-red-600 text-lg leading-none self-start" title="Delete product">&times;</button>
-            </div>
-            <div class="status-area mt-3">
-              ${p.current_price != null ? `
-                <div class="flex items-baseline justify-between">
-                  <span class="text-2xl font-bold">${sym}${formatPrice(p.current_price)}</span>
-                  ${change !== null ? `<span class="text-sm ${changeColor}">${change > 0 ? '▲' : '▼'} ${sym}${formatPrice(Math.abs(change))}</span>` : ''}
-                </div>
-                <div class="mt-2 text-xs text-gray-400">
-                  ${p.snapshot_count} snapshot${p.snapshot_count !== 1 ? 's' : ''}
-                  ${p.last_scraped_at ? ` · ${new Date(p.last_scraped_at).toLocaleString()}` : ''}
-                </div>
-              ` : `
-                <div class="pending-status flex items-center gap-2 text-gray-400">
-                  <span class="inline-block w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin"></span>
-                  <span class="text-sm">Fetching price…</span>
-                </div>
-              `}
-            </div>
-          </div>
-        `;
+      const cards = products.map((p, idx) => {
+        const s = p.last_currency === 'NGN' ? '\u20A6' : '$';
+        const ch = p.price_change_24h;
+        const cc = ch === null ? '' : ch < 0 ? 'text-emerald-400' : ch > 0 ? 'text-rose-400' : 'text-slate-500';
+        const host = new URL(p.url).hostname.replace(/^www\./, '');
+        const title = p.title || host;
+        return '<div class="fade-in bg-slate-800 border border-slate-700/50 rounded-xl p-4 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg hover:shadow-black/30 hover:border-slate-600/50 relative" data-id="'+p.id+'" style="animation-delay:'+(idx*0.04)+'s">'
+          +'<div class="flex gap-3.5">'
+          +(p.image_url ? '<img src="'+p.image_url+'" referrerpolicy="no-referrer" class="w-14 h-14 object-contain rounded-lg shrink-0 bg-slate-700/30" loading="lazy" />' : '<div class="w-14 h-14 rounded-lg shrink-0 bg-slate-700/30 animate-pulse"></div>')
+          +'<div class="flex-1 min-w-0">'
+          +'<a href="/product/'+p.id+'" class="text-sm font-semibold text-slate-100 truncate block hover:text-emerald-400 transition-colors" title="'+title+'">'+title+'</a>'
+          +'<div class="flex items-center gap-2 text-xs mt-1">'
+          +(p.rating ? '<span class="text-amber-400/90 font-medium">\u2605 '+p.rating+'</span>' : '')
+          +'<span class="text-slate-500 truncate">'+host+'</span></div></div>'
+          +'<button class="delete-btn text-slate-600 hover:text-rose-400 text-lg leading-none self-start transition-colors ml-2" title="Delete">&times;</button>'
+          +'</div>'
+          +'<div class="status-area mt-3 pt-3 border-t border-slate-700/40">'
+          +(p.current_price != null
+            ? '<div class="flex items-baseline justify-between"><span class="text-xl font-bold text-slate-100">'+s+fp(p.current_price)+'</span>'
+              +(ch !== null ? '<span class="text-xs font-semibold '+cc+'">'+(ch>0?'\u25B2':'\u25BC')+' '+s+fp(Math.abs(ch))+'</span>' : '')
+              +'</div>'
+              +'<div class="mt-1.5 text-xs text-slate-500">'+p.snapshot_count+' snapshot'+(p.snapshot_count !==1?'s':'')
+              +(p.last_scraped_at ? ' \u00b7 <span title="'+new Date(p.last_scraped_at).toLocaleString()+'">'+timeAgo(p.last_scraped_at)+'</span>' : '')+'</div>'
+            : '<div class="pending-status flex items-center gap-2 text-slate-400"><span class="inline-block w-3.5 h-3.5 border-2 border-slate-600 border-t-emerald-400 rounded-full animate-spin"></span><span class="text-xs">Fetching price\u2026</span></div>')
+          +'</div></div>';
       });
-
       container.innerHTML = cards.join('');
-
       container.querySelectorAll('.delete-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
           e.preventDefault();
           const card = btn.closest('[data-id]');
-          const id = card.dataset.id;
           if (!confirm('Delete this product and all its snapshots?')) return;
-          const delRes = await api(`/api/products/${id}`, { method: 'DELETE' });
+          const delRes = await api('/api/products/'+card.dataset.id, { method: 'DELETE' });
           if (delRes.ok || delRes.status === 204) {
-            card.remove();
-            if (container.querySelectorAll('[data-id]').length === 0) {
-              container.innerHTML = `<div class="col-span-full text-center py-12 text-gray-400">No products tracked yet. <a href="/add" class="text-blue-600 underline">Add one</a></div>`;
-            }
-          } else {
-            alert('Failed to delete product');
-          }
+            card.style.transition = 'opacity 0.25s, transform 0.25s';
+            card.style.opacity = '0'; card.style.transform = 'scale(0.95)';
+            setTimeout(() => {
+              card.remove();
+              const remaining = container.querySelectorAll('[data-id]');
+              document.getElementById('productCount').textContent = remaining.length + ' tracked';
+              if (remaining.length === 0) container.innerHTML = '<div class="col-span-full text-center py-16 text-sm text-slate-500">Nothing tracked yet. <a href="/add" class="text-emerald-400 underline underline-offset-2">Add your first product</a></div>';
+            }, 250);
+          } else alert('Failed to delete product');
         });
       });
-      } catch (e) {
-        document.getElementById('products').innerHTML = `<div class="col-span-full text-center py-12 text-red-400">Error: ${e.message}</div>`;
-      }
-    }
+    } catch(e) { container.innerHTML = '<div class="col-span-full text-center py-16 text-sm text-slate-500">Error: '+e.message+'</div>'; }
+  }
+  function timeAgo(d) { const m = Math.floor((Date.now() - new Date(d).getTime()) / 60000); if (m < 1) return 'just now'; if (m < 60) return m + 'm ago'; const h = Math.floor(m / 60); if (h < 24) return h + 'h ago'; return Math.floor(h / 24) + 'd ago'; }
+  function showToast(msg, type) {
+    let el = document.getElementById('toast');
+    if (!el) { el = document.createElement('div'); el.id = 'toast'; document.body.appendChild(el); }
+    const colors = { info: 'border-slate-600 bg-slate-800 text-slate-200', success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300', error: 'border-rose-500/30 bg-rose-500/10 text-rose-300' };
+    el.className = 'fixed top-4 right-4 z-50 max-w-md border rounded-xl backdrop-blur-sm shadow-2xl p-3.5 text-sm font-medium transition-all duration-300 '+(colors[type]||colors.info);
+    el.textContent = msg; el.classList.remove('hidden');
+    clearTimeout(el._timer); el._timer = setTimeout(() => el.classList.add('hidden'), 8000);
+  }
 
-    // ── Toast system ──────────────────────────────────────────────
-    function showToast(msg, type = 'info') {
-      let el = document.getElementById('toast');
-      if (!el) {
-        el = document.createElement('div');
-        el.id = 'toast';
-        document.body.appendChild(el);
-      }
-      const colors = { info: 'border-blue-400 text-blue-800 bg-blue-50', success: 'border-green-500 text-green-800 bg-green-50', error: 'border-red-400 text-red-800 bg-red-50' };
-      el.className = `fixed top-4 right-4 z-50 max-w-md border-2 rounded-lg shadow-xl p-4 text-sm font-medium transition-all duration-300 ${colors[type] || colors.info}`;
-      el.textContent = msg;
-      el.classList.remove('hidden');
-      clearTimeout(el._timer);
-      el._timer = setTimeout(() => { el.classList.add('hidden'); }, 8000);
-    }
-
-    function currencySymbol(currency) {
-      return currency === 'NGN' ? '\u20A6' : '$';
-    }
-
-    function formatPrice(num) {
-      return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-
-    // ── Event polling (lightweight, replaces SSE) ─────────────────
-    let sseLastId = 0;
-    let pollTimer = null;
-    let pendingCount = 0;
-
-    function updateCardStatus(id, html) {
-      const card = document.querySelector(`[data-id="${id}"]`);
-      if (!card) return;
-      const area = card.querySelector('.status-area');
-      if (area) area.innerHTML = html;
-    }
-
-    function updateCardDetails(id, title, imageUrl, rating) {
-      const card = document.querySelector(`[data-id="${id}"]`);
-      if (!card) return;
-
-      const imgBox = card.querySelector('.flex.gap-4');
-      if (imgBox) {
-        const existingImg = imgBox.querySelector('img');
-        if (imageUrl) {
-          if (existingImg) {
-            existingImg.src = imageUrl;
-          } else {
-            const placeholder = imgBox.querySelector('.animate-pulse');
-            if (placeholder) {
-              placeholder.outerHTML = `<img src="${imageUrl}" referrerpolicy="no-referrer" class="w-20 h-20 object-contain rounded" />`;
+  let sseLastId = 0, pollTimer = null, pendingCount = 0;
+  function updateCardStatus(id, html) {
+    const card = document.querySelector('[data-id="'+id+'"]');
+    if (!card) return;
+    const area = card.querySelector('.status-area');
+    if (area) area.innerHTML = html;
+  }
+  async function pollEvents() {
+    try {
+      const res = await api('/api/events/poll?last_id='+sseLastId);
+      if (!res.ok) return;
+      const events = await res.json();
+      for (const ev of events) {
+        sseLastId = Math.max(sseLastId, ev.id);
+        const card = document.querySelector('[data-id="'+ev.product_id+'"]');
+        if (ev.event_type === 'scraping') {
+          pendingCount++;
+          if (card) {
+            const area = card.querySelector('.status-area');
+            if (area) {
+              const hp = area.querySelector('.text-xl.font-bold');
+              if (hp && !area.querySelector('.scraping-badge')) area.innerHTML = '<div class="flex items-center gap-2 text-emerald-400 mb-2 text-xs scraping-badge"><span class="inline-block w-3 h-3 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin"></span><span class="font-medium">Refreshing\u2026</span></div>'+area.innerHTML;
+              else if (!hp) updateCardStatus(ev.product_id, '<div class="pending-status flex items-center gap-2 text-emerald-400"><span class="inline-block w-3.5 h-3.5 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin"></span><span class="text-xs font-medium">Scraping price\u2026</span></div>');
             }
           }
+        } else if (ev.event_type === 'completed') {
+          pendingCount = Math.max(0, pendingCount - 1);
+          const s = ev.currency === 'NGN' ? '\u20A6' : '$';
+          const ps = ev.price != null ? s+(ev.price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})) : 'no price';
+          const si = ev.snapshot_count != null ? ev.snapshot_count+' snapshot'+(ev.snapshot_count!==1?'s':'') : '';
+          const ts = ev.scraped_at ? timeAgo(ev.scraped_at) : '';
+          updateCardStatus(ev.product_id, '<div class="flex items-baseline justify-between fade-in"><span class="text-xl font-bold text-slate-100">'+ps+'</span></div><div class="mt-1.5 text-xs text-slate-500 fade-in">'+si+(si&&ts?' \u00b7 ':'')+ts+'</div>');
+          if (card) { const tl = card.querySelector('.font-semibold'); if (tl && ev.title) { tl.textContent = ev.title; tl.title = ev.title; } }
+          showToast('Scraped: '+(ev.product_title||'Product')+' \u2014 '+ps, 'success');
+        } else if (ev.event_type === 'failed') {
+          pendingCount = Math.max(0, pendingCount - 1);
+          if (card) { const area = card.querySelector('.status-area'); const hp = area ? area.querySelector('.text-xl.font-bold') : null; if (area && hp) area.innerHTML = '<div class="flex items-center gap-2 text-rose-400 mb-2 text-xs"><span>!</span><span class="font-medium">Update failed \u2014 retrying</span></div>'+area.innerHTML; else updateCardStatus(ev.product_id, '<div class="flex items-center gap-2 text-rose-400 fade-in"><span class="text-xs">! Scrape failed \u2014 will retry</span></div>'); }
+          showToast((ev.product_title||'Product')+' \u2014 couldn\'t fetch price', 'error');
+        } else if (ev.event_type === 'unavailable') {
+          pendingCount = Math.max(0, pendingCount - 1);
+          const s = ev.currency === 'NGN' ? '\u20A6' : '$';
+          const ps = ev.price != null ? s+(ev.price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})) : '';
+          const si = ev.snapshot_count != null ? 'Last: '+ev.snapshot_count+' snapshot'+(ev.snapshot_count!==1?'s':'') : '';
+          const ts = ev.scraped_at ? timeAgo(ev.scraped_at) : '';
+          updateCardStatus(ev.product_id, '<div class="flex items-center gap-2 text-amber-400/70 mb-1 text-xs font-medium">No longer available</div>'+(ps ? '<div class="flex items-baseline justify-between opacity-60"><span class="text-xl font-bold text-slate-100">'+ps+'</span></div><div class="mt-1 text-xs text-slate-500">'+si+(si&&ts?' \u00b7 ':'')+ts+'</div>' : ''));
+          showToast((ev.product_title||'Product')+' \u2014 no longer available', 'error');
         }
       }
-
-      const titleLink = card.querySelector('.font-semibold.truncate.block');
-      if (titleLink && title) {
-        titleLink.textContent = title;
-        titleLink.title = title;
-      }
-
-      const metaRow = card.querySelector('.flex.items-center.gap-2.text-xs');
-      if (metaRow) {
-        let star = metaRow.querySelector('.text-yellow-500');
-        if (rating) {
-          if (star) {
-            star.textContent = `\u2605 ${rating}`;
-          } else {
-            star = document.createElement('span');
-            star.className = 'text-yellow-500';
-            star.textContent = `\u2605 ${rating}`;
-            metaRow.insertBefore(star, metaRow.firstChild);
-          }
-        } else if (star) {
-          star.remove();
-        }
-      }
-    }
-
-    async function pollEvents() {
-      try {
-        const res = await api(`/api/events/poll?last_id=${sseLastId}`);
-        if (!res.ok) return;
-        const events = await res.json();
-        for (const ev of events) {
-          sseLastId = Math.max(sseLastId, ev.id);
-          if (ev.event_type === 'scraping') {
-            pendingCount++;
-            updateCardDetails(ev.product_id, ev.title, ev.product_image_url, ev.product_rating);
-            const card = document.querySelector(`[data-id="${ev.product_id}"]`);
-            if (card) {
-              const statusArea = card.querySelector('.status-area');
-              if (statusArea) {
-                const hasPrice = statusArea.querySelector('.text-2xl.font-bold');
-                if (hasPrice && !statusArea.querySelector('.scraping-badge')) {
-                  const existingInner = statusArea.innerHTML;
-                  statusArea.innerHTML = `
-                    <div class="flex items-center gap-2 text-blue-500 mb-2 text-xs scraping-badge">
-                      <span class="inline-block w-3 h-3 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></span>
-                      <span class="font-medium">Updating price…</span>
-                    </div>
-                    ${existingInner}
-                  `;
-                } else if (!hasPrice) {
-                  updateCardStatus(ev.product_id, `
-                    <div class="pending-status flex items-center gap-2 text-blue-500">
-                      <span class="inline-block w-4 h-4 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></span>
-                      <span class="text-sm font-medium">Scraping price…</span>
-                    </div>
-                  `);
-                }
-              }
-            }
-          } else if (ev.event_type === 'completed') {
-            pendingCount = Math.max(0, pendingCount - 1);
-            const sym = ev.currency === 'NGN' ? '\u20A6' : '$';
-            const priceStr = ev.price != null ? `${sym}${formatPrice(ev.price)}` : 'no price';
-            const snapInfo = ev.snapshot_count != null ? `${ev.snapshot_count} snapshot${ev.snapshot_count !== 1 ? 's' : ''}` : '';
-            const timeStr = ev.scraped_at ? new Date(ev.scraped_at).toLocaleString() : '';
-            updateCardStatus(ev.product_id, `
-              <div class="flex items-baseline justify-between fade-in">
-                <span class="text-2xl font-bold">${priceStr}</span>
-              </div>
-              <div class="mt-2 text-xs text-gray-400 fade-in">${snapInfo}${snapInfo && timeStr ? ' · ' : ''}${timeStr}</div>
-            `);
-            updateCardDetails(ev.product_id, ev.title, ev.image_url, ev.rating);
-            showToast(`Scraped: ${ev.product_title || 'Product'} — ${priceStr}`, 'success');
-          } else if (ev.event_type === 'failed') {
-            pendingCount = Math.max(0, pendingCount - 1);
-            updateCardDetails(ev.product_id, ev.title, ev.product_image_url, ev.product_rating);
-            const card = document.querySelector(`[data-id="${ev.product_id}"]`);
-            if (card) {
-              const statusArea = card.querySelector('.status-area');
-              if (statusArea) {
-                const hasPrice = statusArea.querySelector('.text-2xl.font-bold');
-                if (hasPrice) {
-                  const existingInner = statusArea.innerHTML;
-                  statusArea.innerHTML = `
-                    <div class="flex items-center gap-2 text-red-400 mb-2 text-xs">
-                      <span>⚠</span>
-                      <span class="font-medium">Update failed — will retry</span>
-                    </div>
-                    ${existingInner}
-                  `;
-                } else {
-                  updateCardStatus(ev.product_id, `
-                    <div class="failed-status flex items-center gap-2 text-red-400 fade-in">
-                      <span class="text-base">⚠</span>
-                      <span class="text-sm">Scrape failed — will retry</span>
-                    </div>
-                  `);
-                }
-              }
-            }
-            showToast(`${ev.product_title || 'Product'} — couldn't fetch price`, 'error');
-          } else if (ev.event_type === 'unavailable') {
-            pendingCount = Math.max(0, pendingCount - 1);
-            updateCardDetails(ev.product_id, ev.title, ev.image_url || ev.product_image_url, ev.rating || ev.product_rating);
-            const sym = ev.currency === 'NGN' ? '\u20A6' : '$';
-            const priceStr = ev.price != null ? `${sym}${formatPrice(ev.price)}` : '';
-            const snapInfo = ev.snapshot_count != null ? `Last: ${ev.snapshot_count} snapshot${ev.snapshot_count !== 1 ? 's' : ''}` : '';
-            const timeStr = ev.scraped_at ? new Date(ev.scraped_at).toLocaleString() : '';
-            updateCardStatus(ev.product_id, `
-              <div class="flex items-center gap-2 text-amber-500 mb-2 text-xs">
-                <span>📢</span>
-                <span class="font-medium">No longer available</span>
-              </div>
-              ${priceStr ? `
-                <div class="flex items-baseline justify-between opacity-70">
-                  <span class="text-2xl font-bold">${priceStr}</span>
-                </div>
-                <div class="mt-1 text-xs text-gray-400">${snapInfo}${snapInfo && timeStr ? ' · ' : ''}${timeStr}</div>
-              ` : ''}
-            `);
-            showToast(`${ev.product_title || 'Product'} — no longer available`, 'error');
-          }
-        }
-      } catch(e) {
-        console.error('Poll error', e);
-      }
-      if (pendingCount > 0) {
-        pollTimer = setTimeout(pollEvents, 1500);
-      }
-    }
-
-    checkAuth().then(async () => {
-      try {
-        const res = await api('/api/events/max-id');
-        if (res.ok) sseLastId = await res.json();
-      } catch(_) {}
-      await loadProducts();
-      pendingCount = document.querySelectorAll('[data-id] .pending-status').length;
-      if (pendingCount > 0) {
-        pollTimer = setTimeout(pollEvents, 1500);
-      }
-    });
-  </script>
-</body>
-</html>
+    } catch(e) { console.error('Poll error', e); }
+    if (pendingCount > 0) pollTimer = setTimeout(pollEvents, 1500);
+  }
+  (async () => {
+    try { const res = await api('/api/events/max-id'); if (res.ok) sseLastId = await res.json(); } catch(_) {}
+    pendingCount = document.querySelectorAll('[data-id] .pending-status').length;
+    if (pendingCount > 0) pollTimer = setTimeout(pollEvents, 1500);
+  })();
+</script>
+{% endblock %}

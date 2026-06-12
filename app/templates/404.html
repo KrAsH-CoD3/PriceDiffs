@@ -1,16 +1,28 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Not Found — Pricediff</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-50 text-gray-900">
-  <div class="max-w-sm mx-auto p-6 mt-16 text-center">
-    <p class="text-6xl font-bold text-gray-300 mb-4">404</p>
-    <p class="text-gray-500 mb-6">Nothing to see here.</p>
-    <a href="/" class="inline-block bg-blue-600 text-white px-5 py-2 rounded-lg text-sm hover:bg-blue-700">Go home</a>
+{% extends "base.html" %}
+
+{% block title %}Not found — PriceDiffs{% endblock %}
+
+{% block extra_style %}
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-up { animation: fadeUp 0.5s cubic-bezier(.22,1,.36,1) forwards; opacity: 0; }
+    .d1 { animation-delay: .1s; } .d2 { animation-delay: .2s; } .d3 { animation-delay: .3s; }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } .fade-up { opacity: 1; } }
+{% endblock %}
+
+{% block content %}
+<div class="min-h-[calc(100vh-64px)] flex items-center justify-center px-6 -mt-16">
+  <div class="text-center max-w-sm">
+    <div class="fade-up mb-4">
+      <span class="text-[10rem] font-extrabold leading-none tracking-tighter text-slate-700/30 select-none">404</span>
+    </div>
+    <h1 class="fade-up d1 text-lg font-bold text-slate-100 mb-2">Page not found</h1>
+    <p class="fade-up d2 text-sm text-slate-400 leading-relaxed mb-8">
+      The page you're looking for doesn't exist or has been moved.
+    </p>
+    <div class="fade-up d3 flex items-center justify-center gap-3">
+      <a href="/dashboard" class="inline-flex bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-5 py-2 rounded-xl text-sm font-semibold transition-colors">Dashboard</a>
+      <a href="/" class="text-sm text-slate-500 hover:text-slate-300 transition-colors">Go home</a>
+    </div>
   </div>
-</body>
-</html>
+</div>
+{% endblock %}
