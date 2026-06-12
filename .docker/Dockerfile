@@ -65,9 +65,9 @@ ENV PATH="/app/.venv/bin:$PATH" \
     DJANGO_SETTINGS_MODULE=pricediff.settings \
     DISPLAY=":99"
 
-RUN mkdir -p /app/data && chmod +x /app/.docker/entrypoint.sh
+RUN mkdir -p /app/data
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
     CMD curl -sf http://localhost:8000/ || exit 1
 
-ENTRYPOINT ["/app/.docker/entrypoint.sh"]
+CMD ["supervisord", "-c", "/app/.docker/supervisord.conf", "-n"]
