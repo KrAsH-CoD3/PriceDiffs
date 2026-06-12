@@ -33,10 +33,10 @@
     }
   },
   "sample_url": "https://www.amazon.com/Logitech-Dual-Motor-Feedback-Driving-Responsive/dp/B00Z0UWV98/ref=sr_1_45?keywords=gaming&xpid=RqBZtEcTXKAFh",
-  "success_count": 18,
-  "failure_count": 2,
+  "success_count": 19,
+  "failure_count": 0,
   "created_at": "2026-06-12T12:02:53.129083+00:00",
-  "updated_at": "2026-06-12T18:03:40.546195+00:00",
+  "updated_at": "2026-06-12T19:46:56.415472+00:00",
   "last_success": {
     "proxy_on": true,
     "transport": "http"
