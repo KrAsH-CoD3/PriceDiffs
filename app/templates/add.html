@@ -1,90 +1,57 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Add Product — Pricediff</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-50 text-gray-900">
-  <div class="max-w-2xl mx-auto p-6">
-    <a href="/" class="text-blue-600 text-sm">&larr; Dashboard</a>
-    <h1 class="text-2xl font-bold mt-4 mb-6">Add Product</h1>
+{% extends "base.html" %}
 
-    <form id="addForm" class="space-y-4">
-      <div>
-        <label class="block text-sm font-medium mb-1">Product URL</label>
-        <input type="url" name="url" required autofocus
-          class="w-full border rounded-lg px-3 py-2 text-sm"
-          placeholder="https://www.amazon.com/dp/..." />
-      </div>
-      <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm hover:bg-blue-700">
-        Add & Scrape
-      </button>
-    </form>
+{% block title %}Track New — PriceDiffs{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto px-6 pt-8">
+  <div class="mb-8">
+    <h1 class="text-xl font-bold text-slate-100 mb-1">Track a product</h1>
+    <p class="text-sm text-slate-500">Paste any product URL and we'll start watching the price.</p>
   </div>
 
-  <div id="toast" class="fixed top-4 right-4 z-50 max-w-sm bg-white border rounded-lg shadow-lg p-4 hidden transition-all duration-300"></div>
+  <form id="addForm" class="bg-slate-800 border border-slate-700/60 rounded-2xl p-6 shadow-lg space-y-5">
+    <div>
+      <label class="block text-xs font-semibold text-slate-400 mb-2">Product URL</label>
+      <input type="url" name="url" required autofocus
+        class="w-full bg-slate-700/50 border border-slate-600/50 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all"
+        placeholder="https://www.amazon.com/dp/..." />
+    </div>
+    <button type="submit" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      <span id="btnLabel">Add &amp; Scrape</span>
+    </button>
+  </form>
+</div>
+{% endblock %}
 
-  <script>
-    const ACCESS = localStorage.getItem('access');
-
-    function showToast(msg, type = 'info') {
-      const el = document.getElementById('toast');
-      const colors = { info: 'border-blue-400 text-blue-800', success: 'border-green-400 text-green-800', error: 'border-red-400 text-red-800' };
-      el.className = `fixed top-4 right-4 z-50 max-w-sm bg-white border rounded-lg shadow-lg p-4 ${colors[type] || colors.info} transition-all duration-300`;
-      el.textContent = msg;
-      el.classList.remove('hidden');
-    }
-
-    async function api(path, options = {}) {
-      const headers = { ...options.headers };
-      if (ACCESS) headers['Authorization'] = `Bearer ${ACCESS}`;
-      if (options.body && !(options.body instanceof FormData)) {
-        headers['Content-Type'] = 'application/json';
-      }
-      return fetch(path, { ...options, headers });
-    }
-
-    async function checkAuth() {
-      if (!ACCESS) {
-        window.location.href = '/login';
-        return;
-      }
-      const res = await api('/api/auth/me');
-      if (!res.ok) {
-        localStorage.removeItem('access');
-        localStorage.removeItem('refresh');
-        window.location.href = '/login';
-      }
-    }
-
-    checkAuth();
-
-    const form = document.getElementById('addForm');
-    const submitBtn = form.querySelector('button[type="submit"]');
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Scraping...';
-      submitBtn.classList.remove('hover:bg-blue-700');
-      const url = e.target.url.value;
-      showToast('Scraping started!', 'info');
-      const res = await api('/api/products', {
-        method: 'POST',
-        body: JSON.stringify({ url }),
-      });
-      if (res.ok) {
-        submitBtn.textContent = 'Added!';
-        setTimeout(() => { window.location.href = '/'; }, 300);
-      } else {
-        showToast('Failed to add product. Check the URL.', 'error');
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Add & Scrape';
-        submitBtn.classList.add('hover:bg-blue-700');
-      }
-    });
-  </script>
-</body>
-</html>
+{% block extra_scripts %}
+<div id="toast" class="fixed top-4 right-4 z-50 max-w-md border rounded-xl backdrop-blur-sm shadow-2xl p-3.5 text-sm font-medium transition-all duration-300 hidden"></div>
+<script>
+  const ACCESS = localStorage.getItem('access');
+  if (!ACCESS) { window.location.href = '/login'; }
+  function showToast(msg, type) {
+    const el = document.getElementById('toast');
+    const colors = { info: 'border-slate-600 bg-slate-800 text-slate-200', success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300', error: 'border-rose-500/30 bg-rose-500/10 text-rose-300' };
+    el.className = 'fixed top-4 right-4 z-50 max-w-md border rounded-xl backdrop-blur-sm shadow-2xl p-3.5 text-sm font-medium transition-all duration-300 '+(colors[type]||colors.info);
+    el.textContent = msg; el.classList.remove('hidden');
+  }
+  async function api(path, options = {}) {
+    const headers = { ...options.headers };
+    if (ACCESS) headers['Authorization'] = 'Bearer ' + ACCESS;
+    if (options.body && !(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+    return fetch(path, { ...options, headers });
+  }
+  const form = document.getElementById('addForm');
+  const submitBtn = form.querySelector('button[type="submit"]');
+  const btnLabel = document.getElementById('btnLabel');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    submitBtn.disabled = true; btnLabel.textContent = 'Scraping...';
+    const url = e.target.url.value;
+    showToast('Scraping started!', 'info');
+    const res = await api('/api/products', { method: 'POST', body: JSON.stringify({ url }) });
+    if (res.ok) { btnLabel.textContent = 'Added!'; setTimeout(() => window.location.href = '/dashboard', 300); }
+    else { showToast('Failed to add product. Check the URL.', 'error'); submitBtn.disabled = false; btnLabel.textContent = 'Add &amp; Scrape'; }
+  });
+</script>
+{% endblock %}

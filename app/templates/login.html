@@ -1,57 +1,52 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Login — Pricediff</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-50 text-gray-900">
-  <div class="max-w-sm mx-auto p-6 mt-16">
-    <h1 class="text-2xl font-bold mb-6 text-center">Sign in</h1>
+{% extends "base.html" %}
 
-    <form id="loginForm" class="space-y-4">
+{% block title %}Sign in — PriceDiffs{% endblock %}
+
+{% block content %}
+<div class="min-h-[calc(100vh-64px)] flex items-center justify-center px-6 -mt-16">
+  <div class="w-full max-w-sm">
+    <div class="mb-8 text-center">
+      <h1 class="text-xl font-bold text-slate-100 mb-1.5">Welcome back</h1>
+      <p class="text-sm text-slate-500">Sign in to your dashboard</p>
+    </div>
+
+    <form id="loginForm" class="bg-slate-800 border border-slate-700/60 rounded-2xl p-6 shadow-lg space-y-4">
       <div>
-        <label class="block text-sm font-medium mb-1">Username</label>
-        <input type="text" name="username" required
-          class="w-full border rounded-lg px-3 py-2 text-sm" />
+        <label class="block text-xs font-semibold text-slate-400 mb-2">Username</label>
+        <input type="text" name="username" required autofocus
+          class="w-full bg-slate-700/50 border border-slate-600/50 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all" placeholder="Enter your username" />
       </div>
       <div>
-        <label class="block text-sm font-medium mb-1">Password</label>
+        <label class="block text-xs font-semibold text-slate-400 mb-2">Password</label>
         <input type="password" name="password" required
-          class="w-full border rounded-lg px-3 py-2 text-sm" />
+          class="w-full bg-slate-700/50 border border-slate-600/50 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/20 transition-all" placeholder="Enter your password" />
       </div>
-      <p id="error" class="text-red-600 text-sm hidden"></p>
-      <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded-lg text-sm hover:bg-blue-700">
-        Sign in
-      </button>
+      <p id="error" class="text-rose-400 text-xs font-medium hidden"></p>
+      <button type="submit" class="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 py-2.5 rounded-xl text-sm font-semibold transition-colors">Sign in</button>
     </form>
 
-    <p class="text-center text-sm text-gray-500 mt-4">
-      No account? <a href="/register" class="text-blue-600 underline">Register</a>
+    <p class="text-center text-xs text-slate-500 mt-6">
+      No account? <a href="/register" class="text-emerald-400 hover:text-emerald-300 font-medium transition-colors">Create one</a>
     </p>
   </div>
+</div>
+{% endblock %}
 
-  <script>
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const data = Object.fromEntries(new FormData(e.target));
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      const json = await res.json();
-      if (res.ok) {
-        localStorage.setItem('access', json.access);
-        localStorage.setItem('refresh', json.refresh);
-        window.location.href = '/';
-      } else {
-        const err = document.getElementById('error');
-        err.textContent = json.error || 'Login failed';
-        err.classList.remove('hidden');
-      }
-    });
-  </script>
-</body>
-</html>
+{% block extra_scripts %}
+<script>
+  document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.target));
+    const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const json = await res.json();
+    if (res.ok) {
+      localStorage.setItem('access', json.access); localStorage.setItem('refresh', json.refresh);
+      window.location.href = '/dashboard';
+    } else {
+      const err = document.getElementById('error');
+      err.textContent = json.error || 'Login failed';
+      err.classList.remove('hidden');
+    }
+  });
+</script>
+{% endblock %}
