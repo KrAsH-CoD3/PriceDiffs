@@ -15,4 +15,3 @@ data/*.db
 .env
 .env.*
 README.md
-uv.lock
