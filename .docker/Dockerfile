@@ -42,7 +42,7 @@ FROM python:3.12-slim-bookworm
 RUN apt-get update -qq \
     && apt-get install -y -qq --no-install-recommends \
         libxml2 libxslt1.1 \
-        xvfb supervisor \
+        supervisor \
         curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && find /usr/local/lib -name __pycache__ -exec rm -rf {} + 2>/dev/null \
@@ -63,8 +63,7 @@ COPY --from=builder /app/.docker /app/.docker
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    DJANGO_SETTINGS_MODULE=pricediff.settings \
-    DISPLAY=":99"
+    DJANGO_SETTINGS_MODULE=pricediff.settings
 
 RUN mkdir -p /app/data && chown -R pd:pd /app/data
 
