@@ -45,7 +45,8 @@ RUN apt-get update -qq \
         xvfb supervisor \
         curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && find /usr/local/lib -name __pycache__ -exec rm -rf {} + 2>/dev/null
+    && find /usr/local/lib -name __pycache__ -exec rm -rf {} + 2>/dev/null \
+    && groupadd -r pd && useradd -r -g pd -d /app pd
 
 WORKDIR /app
 
@@ -65,7 +66,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     DJANGO_SETTINGS_MODULE=pricediff.settings \
     DISPLAY=":99"
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && chown -R pd:pd /app/data
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
     CMD curl -sf http://localhost:8000/ || exit 1
