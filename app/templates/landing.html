@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block title %}PriceDiffs — track prices, time your buys{% endblock %}
+
+{% block extra_head %}
+  <style>
+    html { scroll-behavior: smooth; }
+    .reveal { opacity: 0; transform: translateY(20px); transition: opacity 0.6s cubic-bezier(.22,1,.36,1), transform 0.6s cubic-bezier(.22,1,.36,1); }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+    .d1 { transition-delay: .08s; } .d2 { transition-delay: .16s; } .d3 { transition-delay: .24s; }
+    .d4 { transition-delay: .32s; } .d5 { transition-delay: .40s; }
+    @keyframes pulse { 0%,100%{opacity:.4;transform:scale(.8)}50%{opacity:1;transform:scale(1)} }
+    .pulse-dot { animation: pulse 2s ease-in-out infinite }
+    @keyframes tick { from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)} }
+    .tick-in { animation: tick .4s ease-out }
+    @keyframes pop { 0%{transform:scale(1)}50%{transform:scale(1.04)}100%{transform:scale(1.02)} }
+    .pop-hover { transition: transform .25s cubic-bezier(.34,1.56,.64,1); }
+    .pop-hover:hover { transform: scale(1.03); }
+    @keyframes scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+    .carousel-track { animation: scroll 30s linear infinite; display: flex; width: max-content; }
+    .carousel-track:hover { animation-play-state: paused; }
+    @media (prefers-reduced-motion:reduce) {
+      *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+      .reveal{opacity:1;transform:none}.carousel-track{animation:none}
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+<!-- Hero -->
+<section class="relative pt-32 pb-24 px-6 overflow-hidden bg-slate-900">
+  <div class="absolute inset-0 bg-[radial-gradient(ellipse_600px_400px_at_30%_-10%,rgba(99,102,241,0.06),transparent_60%),radial-gradient(ellipse_500px_300px_at_70%_40%,rgba(52,211,153,0.04),transparent_60%)]"></div>
+  <div class="relative max-w-3xl mx-auto text-center">
+    <div class="reveal visible">
+      <span class="inline-flex items-center gap-2 text-[11px] font-medium text-emerald-400 tracking-widest uppercase mb-8">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse-dot"></span>
+        price tracking, automated
+      </span>
+    </div>
+    <h1 class="reveal visible text-4xl sm:text-5xl md:text-6xl font-extrabold tracking-tight leading-[1.08] text-white">
+      Know when<br>prices drop
+    </h1>
+    <p class="reveal visible d1 mt-5 text-base text-slate-400 leading-relaxed max-w-lg mx-auto">
+      Track any product from any store. PriceDiffs watches prices around the clock so you always buy at the right time.
+    </p>
+    <div class="reveal visible d2 mt-8 flex items-center justify-center gap-3 flex-wrap">
+      <a href="/register" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-6 py-2.5 rounded-full text-sm font-semibold shadow-lg shadow-emerald-500/20 transition-all hover:shadow-emerald-500/30">
+        Start tracking free
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+      </a>
+      <a href="#features" class="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        Learn more
+      </a>
+    </div>
+    <div class="reveal visible d3 mt-14 max-w-md mx-auto">
+      <div class="bg-slate-800 border border-slate-700/60 rounded-2xl p-5 text-left shadow-lg">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center text-[10px] text-emerald-400 font-bold">AMZ</div>
+            <div>
+              <div class="text-sm font-semibold text-slate-100">Sony WH-1000XM5</div>
+              <div class="text-[10px] text-slate-500">amazon.com</div>
+            </div>
+          </div>
+          <div class="text-right">
+            <div class="text-base font-bold text-slate-100" id="demo-price">$328.00</div>
+            <div class="text-[10px] text-emerald-400 font-medium" id="demo-change">&darr; $12.50 today</div>
+          </div>
+        </div>
+        <div class="flex items-end gap-[3px] h-12 mb-2">
+          <div class="flex-1 bg-slate-700 rounded-t-sm" style="height:45%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:52%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:38%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:60%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:44%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:55%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:42%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:68%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:48%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:58%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:40%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:65%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:50%"></div><div class="flex-1 bg-slate-700 rounded-t-sm" style="height:72%"></div><div class="flex-1 bg-emerald-500/70 rounded-t-sm" style="height:55%"></div><div class="flex-1 bg-emerald-500/35 rounded-t-sm" style="height:35%"></div>
+        </div>
+        <div class="flex justify-between text-[9px] text-slate-600">
+          <span>May 22</span><span>May 28</span><span>Jun 3</span><span>Jun 12</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- How it works -->
+<section class="py-24 px-6 bg-slate-800 border-t border-b border-slate-700/30">
+  <div class="max-w-4xl mx-auto">
+    <div class="reveal text-center mb-16">
+      <span class="text-[11px] font-semibold text-slate-500 tracking-widest uppercase">How it works</span>
+      <h2 class="text-3xl font-bold tracking-tight text-slate-100 mt-3">Three steps, zero friction</h2>
+    </div>
+    <div class="relative">
+      <div class="hidden md:block absolute top-8 left-[calc(16.67%+24px)] right-[calc(16.67%+24px)] h-px bg-slate-700/50"></div>
+      <div class="grid md:grid-cols-3 gap-6">
+        <div class="reveal d1 bg-slate-900 border border-slate-700/50 rounded-2xl p-6 text-center pop-hover">
+          <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 text-emerald-400 flex items-center justify-center text-lg font-bold mx-auto mb-5 ring-1 ring-emerald-500/20">1</div>
+          <h3 class="text-sm font-semibold text-slate-100 mb-2">Paste a link</h3>
+          <p class="text-xs text-slate-400 leading-relaxed">Drop any product URL. We extract the title, image, and price automatically.</p>
+        </div>
+        <div class="reveal d2 bg-slate-900 border border-slate-700/50 rounded-2xl p-6 text-center pop-hover">
+          <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-indigo-500/5 text-indigo-400 flex items-center justify-center text-lg font-bold mx-auto mb-5 ring-1 ring-indigo-500/20">2</div>
+          <h3 class="text-sm font-semibold text-slate-100 mb-2">We scrape it</h3>
+          <p class="text-xs text-slate-400 leading-relaxed">Our scheduler rescrapes prices every few hours. Set it and forget it.</p>
+        </div>
+        <div class="reveal d3 bg-slate-900 border border-slate-700/50 rounded-2xl p-6 text-center pop-hover">
+          <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500/20 to-amber-500/5 text-amber-400 flex items-center justify-center text-lg font-bold mx-auto mb-5 ring-1 ring-amber-500/20">3</div>
+          <h3 class="text-sm font-semibold text-slate-100 mb-2">Buy at the low</h3>
+          <p class="text-xs text-slate-400 leading-relaxed">See the full price history. Green means drop, red means up. Time your purchase.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="features" class="py-24 px-6 bg-slate-900">
+  <div class="max-w-5xl mx-auto">
+    <div class="reveal mb-16">
+      <span class="text-[11px] font-semibold text-slate-500 tracking-widest uppercase">Features</span>
+      <h2 class="text-3xl font-bold tracking-tight text-slate-100 mt-3">Everything you need to track prices</h2>
+    </div>
+    <div class="grid md:grid-cols-2 gap-5">
+      <div class="reveal d1 bg-slate-800 border border-slate-700/50 rounded-2xl p-6 pop-hover">
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 flex items-center justify-center shrink-0 ring-1 ring-emerald-500/20">
+            <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-100 mb-1.5">Automatic scraping</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">Prices are checked around the clock. No browser extension, no manual refreshing.</p>
+          </div>
+        </div>
+      </div>
+      <div class="reveal d2 bg-slate-800 border border-slate-700/50 rounded-2xl p-6 pop-hover">
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500/20 to-indigo-500/5 flex items-center justify-center shrink-0 ring-1 ring-indigo-500/20">
+            <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-100 mb-1.5">Price history</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">Full timeline of every price change. Spot patterns and know the all-time lows.</p>
+          </div>
+        </div>
+      </div>
+      <div class="reveal d3 bg-slate-800 border border-slate-700/50 rounded-2xl p-6 pop-hover">
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-500/5 flex items-center justify-center shrink-0 ring-1 ring-amber-500/20">
+            <svg class="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-100 mb-1.5">Any store works</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">Amazon, Jumia, eBay, local boutiques &mdash; if there's a price tag, we track it.</p>
+          </div>
+        </div>
+      </div>
+      <div class="reveal d4 bg-slate-800 border border-slate-700/50 rounded-2xl p-6 pop-hover">
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-rose-500/20 to-rose-500/5 flex items-center justify-center shrink-0 ring-1 ring-rose-500/20">
+            <svg class="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-100 mb-1.5">Email notifications</h3>
+            <p class="text-xs text-slate-400 leading-relaxed">Get alerted when prices drop below your target. Coming soon.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Supported sites carousel -->
+<section class="py-20 px-6 bg-slate-800 border-t border-b border-slate-700/30 overflow-hidden">
+  <div class="max-w-6xl mx-auto">
+    <div class="reveal text-center mb-10">
+      <span class="text-[11px] font-semibold text-slate-500 tracking-widest uppercase">Supported stores</span>
+      <h2 class="text-2xl font-bold tracking-tight text-slate-100 mt-3">Track prices from anywhere</h2>
+    </div>
+  </div>
+  <div class="relative max-w-full">
+    <div class="carousel-track">
+      {% for store in stores %}
+      <div class="flex-shrink-0 w-44 mx-2 bg-slate-900 border border-slate-700/50 rounded-xl px-5 py-6 text-center pop-hover cursor-default">
+        <img src="https://www.google.com/s2/favicons?domain={{ store.domain }}&sz=64" alt="" class="w-12 h-12 mx-auto mb-3 rounded-lg" onerror="this.style.display='none'">
+        <div class="text-sm font-semibold text-slate-200">{{ store.name }}</div>
+        <div class="text-[11px] text-slate-500 font-mono mt-0.5">{{ store.domain }}</div>
+      </div>
+      {% endfor %}
+      {% for store in stores %}
+      <div class="flex-shrink-0 w-44 mx-2 bg-slate-900 border border-slate-700/50 rounded-xl px-5 py-6 text-center pop-hover cursor-default">
+        <img src="https://www.google.com/s2/favicons?domain={{ store.domain }}&sz=64" alt="" class="w-12 h-12 mx-auto mb-3 rounded-lg" onerror="this.style.display='none'">
+        <div class="text-sm font-semibold text-slate-200">{{ store.name }}</div>
+        <div class="text-[11px] text-slate-500 font-mono mt-0.5">{{ store.domain }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="py-28 px-6 bg-slate-900 relative overflow-hidden">
+  <div class="absolute inset-0 bg-[radial-gradient(ellipse_500px_300px_at_50%_100%,rgba(52,211,153,0.04),transparent_70%)]"></div>
+  <div class="relative max-w-lg mx-auto text-center reveal">
+    <h2 class="text-3xl md:text-4xl font-extrabold tracking-tight text-white leading-tight">
+      Ready to start<br>saving money?
+    </h2>
+    <p class="mt-4 text-base text-slate-400 leading-relaxed">
+      No credit card required. Email is optional.<br>Just a username and password to get started.
+    </p>
+    <div class="mt-10 flex items-center justify-center gap-3">
+      <a href="/register" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-7 py-3 rounded-full text-sm font-semibold shadow-lg shadow-emerald-500/20 transition-all hover:shadow-emerald-500/30">
+        Get started free
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+      </a>
+      <a href="/login" class="text-sm text-slate-500 hover:text-slate-300 transition-colors">Sign in instead</a>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="py-10 px-6 bg-slate-800 border-t border-slate-700/30">
+  <div class="max-w-6xl mx-auto flex items-center justify-between">
+    <span class="text-xs text-slate-500">&copy; {% now "Y" %} PriceDiffs</span>
+    <span class="text-xs text-slate-600">prices change. so should you.</span>
+  </div>
+</footer>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+  }, { threshold: 0.05, rootMargin: '0px 0px -48px 0px' });
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+  setInterval(() => {
+    const price = document.getElementById('demo-price');
+    const change = document.getElementById('demo-change');
+    const current = parseFloat(price.textContent.replace('$', ''));
+    const delta = (Math.random() - 0.48) * 5;
+    const abs = Math.abs(delta);
+    price.textContent = '$' + Math.max(1, current + delta).toFixed(2);
+    if (delta < 0) { change.textContent = '\u2193 $' + abs.toFixed(2) + ' today'; change.className = 'text-[10px] text-emerald-400 font-medium tick-in'; }
+    else { change.textContent = '\u2191 $' + abs.toFixed(2) + ' today'; change.className = 'text-[10px] text-rose-400 font-medium tick-in'; }
+  }, 3800);
+</script>
+{% endblock %}
