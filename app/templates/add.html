@@ -14,7 +14,7 @@
     <form id="addForm" class="space-y-4">
       <div>
         <label class="block text-sm font-medium mb-1">Product URL</label>
-        <input type="url" name="url" required
+        <input type="url" name="url" required autofocus
           class="w-full border rounded-lg px-3 py-2 text-sm"
           placeholder="https://www.amazon.com/dp/..." />
       </div>
@@ -24,8 +24,18 @@
     </form>
   </div>
 
+  <div id="toast" class="fixed top-4 right-4 z-50 max-w-sm bg-white border rounded-lg shadow-lg p-4 hidden transition-all duration-300"></div>
+
   <script>
     const ACCESS = localStorage.getItem('access');
+
+    function showToast(msg, type = 'info') {
+      const el = document.getElementById('toast');
+      const colors = { info: 'border-blue-400 text-blue-800', success: 'border-green-400 text-green-800', error: 'border-red-400 text-red-800' };
+      el.className = `fixed top-4 right-4 z-50 max-w-sm bg-white border rounded-lg shadow-lg p-4 ${colors[type] || colors.info} transition-all duration-300`;
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
 
     async function api(path, options = {}) {
       const headers = { ...options.headers };
@@ -57,17 +67,19 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Adding...';
+      submitBtn.textContent = 'Scraping...';
       submitBtn.classList.remove('hover:bg-blue-700');
       const url = e.target.url.value;
+      showToast('Scraping started!', 'info');
       const res = await api('/api/products', {
         method: 'POST',
         body: JSON.stringify({ url }),
       });
       if (res.ok) {
-        window.location.href = '/';
+        submitBtn.textContent = 'Added!';
+        setTimeout(() => { window.location.href = '/'; }, 300);
       } else {
-        alert('Failed to add product');
+        showToast('Failed to add product. Check the URL.', 'error');
         submitBtn.disabled = false;
         submitBtn.textContent = 'Add & Scrape';
         submitBtn.classList.add('hover:bg-blue-700');

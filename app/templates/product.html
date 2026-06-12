@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title id="pageTitle">Product — PriceDiffs</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .fade-in { animation: fadeSlideIn 0.4s ease-out; }
+    @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
 </head>
 <body class="bg-gray-50 text-gray-900">
   <div class="max-w-4xl mx-auto p-6">
@@ -74,6 +78,22 @@
       return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
+    // ── Toast system ──────────────────────────────────────────────
+    function showToast(msg, type = 'info') {
+      let el = document.getElementById('toast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'toast';
+        document.body.appendChild(el);
+      }
+      const colors = { info: 'border-blue-400 text-blue-800 bg-blue-50', success: 'border-green-500 text-green-800 bg-green-50', error: 'border-red-400 text-red-800 bg-red-50' };
+      el.className = `fixed top-4 right-4 z-50 max-w-md border-2 rounded-lg shadow-xl p-4 text-sm font-medium transition-all duration-300 ${colors[type] || colors.info}`;
+      el.textContent = msg;
+      el.classList.remove('hidden');
+      clearTimeout(el._timer);
+      el._timer = setTimeout(() => { el.classList.add('hidden'); }, 8000);
+    }
+
     async function loadProduct() {
       try {
         const res = await api(`/api/products/${PRODUCT_ID}`);
@@ -96,12 +116,17 @@
         // Product info card
         html += `
           <div class="bg-white rounded-xl shadow-sm border p-6 flex flex-col sm:flex-row gap-6">
-            ${p.image_url ? `<img src="${p.image_url}" class="w-40 h-40 object-contain rounded-lg shrink-0" />` : ''}
+            ${p.image_url ? `<img src="${p.image_url}" referrerpolicy="no-referrer" class="w-40 h-40 object-contain rounded-lg shrink-0" />` : ''}
             <div class="flex-1 min-w-0">
               <a href="${p.url}" target="_blank" class="text-blue-600 text-sm hover:underline block mb-2 truncate">${p.url}</a>
               ${p.rating ? `<span class="text-yellow-500 text-sm">★ ${p.rating}</span>` : ''}
-              <div class="mt-4 text-3xl font-bold">
-                ${latest ? `${sym}${formatPrice(latest.price)}` : '<span class="text-gray-400 text-lg">Not scraped yet</span>'}
+              <div class="mt-4 text-3xl font-bold" id="priceDisplay">
+                ${latest
+                  ? `${sym}${formatPrice(latest.price)}`
+                  : `<span class="inline-flex items-center gap-2 text-gray-400 text-lg">
+                      <span class="inline-block w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin"></span>
+                      Fetching price…
+                    </span>`}
               </div>
               <div class="mt-1 text-sm text-gray-500">
                 ${p.price_change_24h !== null ? `
@@ -115,6 +140,7 @@
                 ${p.lowest_price !== null ? `Low: ${sym}${formatPrice(p.lowest_price)}` : ''}
                 ${p.highest_price !== null ? ` · High: ${sym}${formatPrice(p.highest_price)}` : ''}
               </div>
+              ${latest ? `<div id="snapshotMeta" class="mt-1 text-xs text-gray-400">${snapshots.length} snapshot${snapshots.length !== 1 ? 's' : ''} · ${new Date(latest.scraped_at).toLocaleString()}</div>` : ''}
             </div>
           </div>
         `;
@@ -134,9 +160,9 @@
                 ${sorted.map(sp => {
                   const pct = (sp.price - minP) / range;
                   const spSym = currencySymbol(sp.currency);
-                  return `<div class="flex-1 bg-blue-500 rounded-t hover:bg-blue-600 relative group" style="height:${Math.max(6, pct * 100)}%" title="${spSym}${formatPrice(sp.price)} — ${new Date(sp.scraped_at).toLocaleDateString()}">
+                  return `<div class="flex-1 bg-blue-500 rounded-t hover:bg-blue-600 relative group" style="height:${Math.max(6, pct * 100)}%" title="${spSym}${formatPrice(sp.price)} — ${new Date(sp.scraped_at).toLocaleString()}">
                     <div class="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none z-10">
-                      ${spSym}${formatPrice(sp.price)}<br>${new Date(sp.scraped_at).toLocaleDateString()}
+                      ${spSym}${formatPrice(sp.price)}<br>${new Date(sp.scraped_at).toLocaleString()}
                     </div>
                   </div>`;
                 }).join('')}
@@ -175,9 +201,8 @@
         } else {
           html += `
             <div class="bg-white rounded-xl shadow-sm border p-6 text-center text-gray-400">
-              <p class="mb-2">This product hasn't been scraped yet.</p>
-              <p class="text-sm">A Celery worker is needed to process the scrape. Start one with:</p>
-              <code class="block mt-2 text-xs bg-gray-100 p-2 rounded">.venv/bin/celery -A pricediff worker --loglevel=info</code>
+              <p class="mb-2">Waiting for first price check…</p>
+              <p class="text-sm">We'll have pricing data for you shortly.</p>
             </div>
           `;
         }
@@ -208,7 +233,130 @@
       }
     }
 
-    checkAuth().then(loadProduct);
+    function updatePriceDisplay(html) {
+      const el = document.getElementById('priceDisplay');
+      if (el) { el.innerHTML = html; el.classList.add('fade-in'); }
+    }
+
+    function updateProductDetails(title, imageUrl, rating) {
+      if (title) {
+        document.getElementById('pageTitle').textContent = title + ' \u2014 PriceDiffs';
+        document.getElementById('productTitle').textContent = title;
+      }
+      if (imageUrl) {
+        let img = document.querySelector('#content div:first-child img');
+        if (!img && imageUrl) {
+          const container = document.querySelector('#content div:first-child .flex-1.min-w-0');
+          if (container) {
+            const parent = container.closest('.flex');
+            if (parent) {
+              parent.insertAdjacentHTML('afterbegin', `<img src="${imageUrl}" referrerpolicy="no-referrer" class="w-40 h-40 object-contain rounded-lg shrink-0" />`);
+            }
+          }
+        } else if (img) {
+          img.src = imageUrl;
+        }
+      }
+      if (rating) {
+        const container = document.querySelector('#content .flex-1.min-w-0');
+        if (container) {
+          let star = container.querySelector('.text-yellow-500');
+          if (star) {
+            star.textContent = '\u2605 ' + rating;
+          } else {
+            const urlLink = container.querySelector('a[href]');
+            if (urlLink) {
+              urlLink.insertAdjacentHTML('afterend', `<span class="text-yellow-500 text-sm">\u2605 ${rating}</span>`);
+            }
+          }
+        }
+      }
+    }
+
+    // ── Event polling ─────────────────────────────────────────────
+    let sseLastId = 0;
+    let pollTimer = null;
+    let pollDone = false;
+
+    async function pollEvents() {
+      if (pollDone) return;
+      try {
+        const res = await api(`/api/events/poll?last_id=${sseLastId}`);
+        if (!res.ok) return;
+        const events = await res.json();
+        for (const ev of events) {
+          if (ev.product_id !== PRODUCT_ID) continue;
+          sseLastId = Math.max(sseLastId, ev.id);
+          if (ev.event_type === 'scraping') {
+            updateProductDetails(ev.title, ev.product_image_url, ev.product_rating);
+            const priceDisplay = document.getElementById('priceDisplay');
+            if (priceDisplay && !priceDisplay.querySelector('.scraping-badge')) {
+              const hasPrice = /^[$₦]/.test(priceDisplay.textContent.trim());
+              if (hasPrice) {
+                const originalHTML = priceDisplay.innerHTML;
+                priceDisplay.innerHTML = `
+                  <div class="flex items-center gap-2 text-blue-500 mb-2 text-sm scraping-badge">
+                    <span class="inline-block w-4 h-4 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></span>
+                    <span class="font-medium">Updating price…</span>
+                  </div>
+                  <div class="text-3xl font-bold">${originalHTML.trim()}</div>
+                `;
+              } else {
+                updatePriceDisplay(`<span class="inline-flex items-center gap-2 text-blue-500 text-lg">
+                  <span class="inline-block w-5 h-5 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></span>
+                  <span class="font-medium">Scraping price…</span>
+                </span>`);
+              }
+            }
+          } else if (ev.event_type === 'completed') {
+            pollDone = true;
+            updateProductDetails(ev.title, ev.image_url, ev.rating);
+            loadProduct();
+          } else if (ev.event_type === 'failed') {
+            pollDone = true;
+            updateProductDetails(ev.title, ev.product_image_url, ev.product_rating);
+            const priceDisplay = document.getElementById('priceDisplay');
+            if (priceDisplay) {
+              const hasPrice = /^[$₦]/.test(priceDisplay.textContent.trim());
+              if (hasPrice) {
+                const price = priceDisplay.textContent.trim();
+                updatePriceDisplay(`<div class="text-red-400 text-sm fade-in">⚠ Update failed — will retry</div><div class="text-3xl font-bold">${price}</div>`);
+              } else {
+                updatePriceDisplay(`<span class="text-red-400 text-lg fade-in">⚠ Scrape failed — will retry</span>`);
+              }
+            }
+          } else if (ev.event_type === 'unavailable') {
+            pollDone = true;
+            updateProductDetails(ev.title, ev.image_url || ev.product_image_url, ev.rating || ev.product_rating);
+            const sym = ev.currency === 'NGN' ? '\u20A6' : '$';
+            const priceStr = ev.price != null ? `${sym}${formatPrice(ev.price)}` : '';
+            updatePriceDisplay(`
+              <div class="text-amber-500 text-sm fade-in">📢 No longer available</div>
+              ${priceStr ? `<div class="text-3xl font-bold mt-1 opacity-70">${priceStr}</div>` : ''}
+              ${ev.scraped_at ? `<div class="text-xs text-gray-400 mt-1">Last updated: ${new Date(ev.scraped_at).toLocaleString()}</div>` : ''}
+            `);
+          }
+        }
+      } catch(e) {
+        console.error('Poll error', e);
+      }
+      if (!pollDone) {
+        pollTimer = setTimeout(pollEvents, 1500);
+      }
+    }
+
+    checkAuth().then(async () => {
+      try {
+        const res = await api('/api/events/max-id');
+        if (res.ok) sseLastId = await res.json();
+      } catch(_) {}
+      await loadProduct();
+      const priceDisplay = document.getElementById('priceDisplay');
+      const needsPoll = priceDisplay && priceDisplay.querySelector('.animate-spin');
+      if (needsPoll) {
+        pollTimer = setTimeout(pollEvents, 1500);
+      }
+    });
   </script>
 </body>
 </html>
