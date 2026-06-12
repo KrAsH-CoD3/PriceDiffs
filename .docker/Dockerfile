@@ -42,11 +42,11 @@ FROM python:3.12-slim-bookworm
 RUN apt-get update -qq \
     && apt-get install -y -qq --no-install-recommends \
         libxml2 libxslt1.1 \
-        supervisor \
-        curl ca-certificates \
+        supervisor curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && find /usr/local/lib -name __pycache__ -exec rm -rf {} + 2>/dev/null \
-    && groupadd -r pd && useradd -r -g pd -d /app pd
+    && groupadd -r pd && useradd -r -g pd -d /app pd \
+    && mkdir -p /home/pd && chown -R pd:pd /home/pd
 
 WORKDIR /app
 
@@ -66,8 +66,5 @@ ENV PATH="/app/.venv/bin:$PATH" \
     DJANGO_SETTINGS_MODULE=pricediff.settings
 
 RUN mkdir -p /app/data && chown -R pd:pd /app/data
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
-    CMD curl -sf http://localhost:8000/ || exit 1
 
 CMD ["supervisord", "-c", "/app/.docker/supervisord.conf", "-n"]
