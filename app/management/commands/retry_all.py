@@ -8,9 +8,9 @@ from pathlib import Path
 import httpx
 from django.core.management.base import BaseCommand
 from app.strategy import (
-    scrape_url, forge_strategy, _close_browser, _get_browser,
+    scrape_url,
     get_domain, load_strategy, save_strategy, STRATEGIES_DIR,
-    _try_jsonld_from_http, _discover_dom,
+    _extract_jsonld, _probe_dom_selectors,
 )
 
 FAILED_SITES = [
@@ -86,7 +86,7 @@ def _extract_price(data):
 
 async def save_dom_strategy(domain, url, page):
     """Try DOM probe and save strategy if successful."""
-    strategy = await _discover_dom(domain, url, page)
+    strategy = await _probe_dom_selectors(domain, url)
     if strategy:
         save_strategy(strategy)
         return strategy
@@ -183,7 +183,6 @@ class Command(BaseCommand):
                 return await scrape_with_retry(site, 5)
         tasks = [run_one(s) for s in FAILED_SITES]
         results = await asyncio.gather(*tasks)
-        await _close_browser()
         return results
 
     def _report(self, results):

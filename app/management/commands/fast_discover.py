@@ -2,7 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 from django.core.management.base import BaseCommand
-from app.strategy import scrape_url, _close_browser, get_domain, STRATEGIES_DIR
+from app.strategy import scrape_url, get_domain, STRATEGIES_DIR
 import time
 
 NEW_SITES = [
@@ -67,7 +67,6 @@ class Command(BaseCommand):
             self.stdout.write(f"{'='*60}")
             result = await self._scrape_once(site, 1, 7)
             results.append(result)
-        await _close_browser()
         return results
 
     def _print_report(self, results):

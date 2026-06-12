@@ -1,7 +1,7 @@
 import asyncio
 from asgiref.sync import sync_to_async
 from django.core.management.base import BaseCommand
-from app.strategy import scrape_url, _close_browser
+from app.strategy import scrape_url
 from app.models import Product, PriceSnapshot
 
 
@@ -42,6 +42,4 @@ class Command(BaseCommand):
             self.stdout.write(f"  Title: {data.get('title', '')[:60]}...")
             self.stdout.write(f"  Price: {symbol}{data.get('price', 0):.2f}")
 
-        await _close_browser()
-        await asyncio.sleep(0)
         self.stdout.write("\nDone.")
