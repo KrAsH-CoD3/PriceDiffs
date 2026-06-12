@@ -1,9 +1,9 @@
 {
   "domain": "agbeke.com",
   "site_name": "Agbeke",
-  "strategy_type": "api",
+  "strategy_type": "jsonld",
   "api": {
-    "endpoint": "https://agbeke.com/product/ayo-2/",
+    "endpoint": "https://agbeke.com/product/adunni-boubou/",
     "method": "GET",
     "req_headers": {},
     "field_mapping": {
@@ -24,16 +24,17 @@
         "image_url"
       ]
     },
-    "_jsonld_fields": {
-      "title": "Ayo",
-      "price": 130000.0,
+    "fields": {
+      "title": "Adunni Boubou",
+      "price": 110000.0,
       "rating": "",
-      "image_url": "https://agbeke.com/wp-content/uploads/2026/03/Ayo.jpg"
+      "image_url": "https://agbeke.com/wp-content/uploads/2026/03/Adunni-Boubou.jpeg",
+      "currency": "NGN"
     }
   },
-  "sample_url": "https://agbeke.com/product/ayo-2/",
-  "success_count": 6,
+  "sample_url": "https://agbeke.com/product/adunni-boubou/",
+  "success_count": 36,
   "failure_count": 0,
-  "created_at": "2026-05-30T00:38:37.182845+00:00",
-  "updated_at": "2026-06-03T03:21:53.183889+00:00"
+  "created_at": "2026-06-09T18:06:12.930812+00:00",
+  "updated_at": "2026-06-10T21:25:00.463957+00:00"
 }

@@ -1,7 +1,7 @@
 {
   "domain": "ng.ecoflow.com",
   "site_name": "Ng",
-  "strategy_type": "api",
+  "strategy_type": "jsonld",
   "api": {
     "endpoint": "https://ng.ecoflow.com/products/ecoflow-wave-3-portable-air-conditioner",
     "method": "GET",
@@ -24,16 +24,17 @@
         "image_url"
       ]
     },
-    "_jsonld_fields": {
+    "fields": {
       "title": "EcoFlow WAVE 3 Portable Air Conditioner",
       "price": 1108000.0,
       "rating": "",
-      "image_url": "https://ng.ecoflow.com/cdn/shop/files/W3_W3_EB_TRV_1500x.png?v=1772175764"
+      "image_url": "https://ng.ecoflow.com/cdn/shop/files/W3_W3_EB_TRV_1500x.png?v=1772175764",
+      "currency": "NGN"
     }
   },
   "sample_url": "https://ng.ecoflow.com/products/ecoflow-wave-3-portable-air-conditioner",
-  "success_count": 2,
+  "success_count": 12,
   "failure_count": 0,
-  "created_at": "2026-05-30T00:38:33.914733+00:00",
-  "updated_at": "2026-05-30T02:00:59.761082+00:00"
+  "created_at": "2026-06-10T03:47:10.588119+00:00",
+  "updated_at": "2026-06-10T22:09:47.461892+00:00"
 }

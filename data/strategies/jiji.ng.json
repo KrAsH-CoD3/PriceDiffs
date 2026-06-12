@@ -1,0 +1,44 @@
+{
+  "domain": "jiji.ng",
+  "site_name": "Jiji",
+  "strategy_type": "metadata",
+  "api": {
+    "endpoint": "https://jiji.ng/ikeja/cars/toyota-fortuner-2-4-d-awd-2015-black-8abNbFYgbLsCZYnOZqIbKOiG.html",
+    "method": "GET",
+    "req_headers": {},
+    "field_mapping": {
+      "title": [
+        "jsonld",
+        "title"
+      ],
+      "price": [
+        "jsonld",
+        "price"
+      ],
+      "rating": [
+        "jsonld",
+        "rating"
+      ],
+      "image_url": [
+        "jsonld",
+        "image_url"
+      ]
+    },
+    "fields": {
+      "title": "Toyota Fortuner 2.4 D AWD 2015 Black",
+      "price": 18500000.0,
+      "rating": "",
+      "image_url": "https://pictures-nigeria.jijistatic.net/199393482_MTE5NS04OTYtOTdmNTQ0ZTJiYg.webp",
+      "currency": "NGN"
+    }
+  },
+  "sample_url": "https://jiji.ng/ikeja/cars/toyota-fortuner-2-4-d-awd-2015-black-8abNbFYgbLsCZYnOZqIbKOiG.html",
+  "success_count": 28,
+  "failure_count": 0,
+  "created_at": "2026-06-11T03:56:03.030129+00:00",
+  "updated_at": "2026-06-12T03:52:23.931439+00:00",
+  "last_success": {
+    "proxy_on": true,
+    "transport": "http"
+  }
+}

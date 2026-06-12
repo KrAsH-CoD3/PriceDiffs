@@ -1,0 +1,44 @@
+{
+  "domain": "m.ebay.com",
+  "site_name": "M",
+  "strategy_type": "metadata",
+  "api": {
+    "endpoint": "https://m.ebay.com/itm/336552962646?_trkparms=amclksrc%3DITM%26aid%3D777008%26algo%3DPERSONAL.TOPIC%26ao%3D1%26asc%3D20250506202701%26meid%3D81848b111ccc4c7180ef72a050a0cc18%26pid%3D102754%26rk%3D5%26rkt%3D10%26mehot%3Dnone%26itm%3D336552962646%26pmt%3D0%26noa%3D1%26pg%3D4375194%26algv%3DPersonalizedTopicsV2WithDynamicSizeRanker_BP%26brand%3DApple%26tu%3D01KTWYNQ9WRD1GA8DJC655NJVG",
+    "method": "GET",
+    "req_headers": {},
+    "field_mapping": {
+      "title": [
+        "jsonld",
+        "title"
+      ],
+      "price": [
+        "jsonld",
+        "price"
+      ],
+      "rating": [
+        "jsonld",
+        "rating"
+      ],
+      "image_url": [
+        "jsonld",
+        "image_url"
+      ]
+    },
+    "fields": {
+      "title": "NEW - Apple iPhone 4s  16 GB  BLACK Verizon Factory Sealed! Collectible, vintage",
+      "price": 795.0,
+      "rating": "",
+      "image_url": "https://i.ebayimg.com/images/g/GkwAAeSwLQ1p7V57/s-l400.jpg",
+      "currency": "GBP"
+    }
+  },
+  "sample_url": "https://m.ebay.com/itm/336552962646?_trkparms=amclksrc%3DITM%26aid%3D777008%26algo%3DPERSONAL.TOPIC%26ao%3D1%26asc%3D20250506202701%26meid%3D81848b111ccc4c7180ef72a050a0cc18%26pid%3D102754%26rk%3D5%26rkt%3D10%26mehot%3Dnone%26itm%3D336552962646%26pmt%3D0%26noa%3D1%26pg%3D4375194%26algv%3DPersonalizedTopicsV2WithDynamicSizeRanker_BP%26brand%3DApple%26tu%3D01KTWYNQ9WRD1GA8DJC655NJVG",
+  "success_count": 2,
+  "failure_count": 0,
+  "created_at": "2026-06-12T04:19:24.550027+00:00",
+  "updated_at": "2026-06-12T04:21:31.614792+00:00",
+  "last_success": {
+    "proxy_on": false,
+    "transport": "http"
+  }
+}

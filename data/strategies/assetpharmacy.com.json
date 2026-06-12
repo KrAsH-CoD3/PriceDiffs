@@ -1,9 +1,9 @@
 {
   "domain": "assetpharmacy.com",
   "site_name": "Assetpharmacy",
-  "strategy_type": "api",
+  "strategy_type": "jsonld",
   "api": {
-    "endpoint": "https://assetpharmacy.com/product/panadol-pain-fever-per-sachet/",
+    "endpoint": "https://assetpharmacy.com/product/accu-chek-instant-blood-glucose-monitoring-system/",
     "method": "GET",
     "req_headers": {},
     "field_mapping": {
@@ -24,17 +24,17 @@
         "image_url"
       ]
     },
-    "_jsonld_fields": {
-      "title": "Panadol Pain &amp; Fever Caplets, 10 Caplets",
-      "price": 600.0,
+    "fields": {
+      "title": "Accu-Chek Instant Blood Glucose Monitoring System",
+      "price": 30500.0,
       "rating": "5",
-      "image_url": "",
+      "image_url": "https://assetpharmacy.com/wp-content/uploads/2024/04/accu-chek-instany-monitor-1.jpg",
       "currency": "NGN"
     }
   },
-  "sample_url": "https://assetpharmacy.com/product/panadol-pain-fever-per-sachet/",
-  "success_count": 10,
+  "sample_url": "https://assetpharmacy.com/product/accu-chek-instant-blood-glucose-monitoring-system/",
+  "success_count": 37,
   "failure_count": 0,
-  "created_at": "2026-06-02T09:12:21.906733+00:00",
-  "updated_at": "2026-06-03T03:21:51.644200+00:00"
+  "created_at": "2026-06-09T18:03:49.982226+00:00",
+  "updated_at": "2026-06-10T21:24:59.092937+00:00"
 }
