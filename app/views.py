@@ -1,10 +1,9 @@
-import json
 import re
 from urllib.parse import urlparse, urlunparse
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from django.http import Http404, HttpResponse
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
@@ -51,30 +50,63 @@ def _jwt_response(user):
 
 # ── HTML pages ─────────────────────────────────────────────────────────
 
+def landing(request):
+    stores = [
+        {"name": "Amazon", "domain": "amazon.com"},
+        {"name": "eBay", "domain": "ebay.com"},
+        {"name": "Jumia", "domain": "jumia.com.ng"},
+        {"name": "Konga", "domain": "konga.com"},
+        {"name": "Jiji", "domain": "jiji.ng"},
+        {"name": "Slot", "domain": "slot.ng"},
+        {"name": "Agbeke", "domain": "agbeke.com"},
+        {"name": "SimsNG", "domain": "simsng.com"},
+        {"name": "Kara", "domain": "kara.com.ng"},
+        {"name": "Ajebomarket", "domain": "ajebomarket.com"},
+        {"name": "Asset Pharmacy", "domain": "assetpharmacy.com"},
+        {"name": "Ciska", "domain": "ciska.com.ng"},
+    ]
+    return render(request, "landing.html", {"stores": stores})
+
+
+@login_required
 def dashboard(request):
     return render(request, "dashboard.html")
 
 
+@login_required
 def add_page(request):
     return render(request, "add.html")
 
 
+@login_required
+@login_required
 def product_page(request, product_id):
-    if not request.user.is_authenticated:
-        raise Http404
     try:
         Product.objects.get(pk=product_id, user=request.user)
     except Product.DoesNotExist:
-        raise Http404
+        return render(request, "404.html", status=404)
     return render(request, "product.html", {"product_id": product_id})
 
 
+def not_found(request, exception=None, **kwargs):
+    return render(request, "404.html", status=404)
+
+
 def login_page(request):
+    if request.user.is_authenticated:
+        return redirect("dashboard")
     return render(request, "login.html")
 
 
 def register_page(request):
+    if request.user.is_authenticated:
+        return redirect("dashboard")
     return render(request, "register.html")
+
+
+def logout_view(request):
+    logout(request)
+    return redirect("landing")
 
 
 # ── Auth API ────────────────────────────────────────────────────────────
