@@ -31,10 +31,10 @@
     "og_price": ""
   },
   "sample_url": "https://slot.ng/products/tecno-pop-10-3gb-64gb",
-  "success_count": 3,
+  "success_count": 17,
   "failure_count": 0,
   "created_at": "2026-06-11T03:35:39.252845+00:00",
-  "updated_at": "2026-06-11T03:47:37.123883+00:00",
+  "updated_at": "2026-06-12T18:03:57.392229+00:00",
   "last_success": {
     "proxy_on": false,
     "transport": "browser"

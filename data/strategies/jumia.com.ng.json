@@ -33,10 +33,10 @@
     }
   },
   "sample_url": "https://www.jumia.com.ng/airforce-1-sneakers-fashion-mpg11957645.html",
-  "success_count": 28,
+  "success_count": 36,
   "failure_count": 0,
   "created_at": "2026-06-10T21:19:39.919567+00:00",
-  "updated_at": "2026-06-11T03:50:10.830364+00:00",
+  "updated_at": "2026-06-12T18:03:45.297849+00:00",
   "last_success": {
     "proxy_on": true,
     "transport": "http"

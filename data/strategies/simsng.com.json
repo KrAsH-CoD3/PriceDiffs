@@ -33,10 +33,10 @@
     }
   },
   "sample_url": "https://simsng.com/product/tcl-ac-tac-18cfd-mcix-r32-inv-outdoor/",
-  "success_count": 41,
+  "success_count": 43,
   "failure_count": 0,
   "created_at": "2026-06-09T18:06:32.401935+00:00",
-  "updated_at": "2026-06-12T03:48:04.164332+00:00",
+  "updated_at": "2026-06-12T18:03:53.402575+00:00",
   "last_success": {
     "proxy_on": false,
     "transport": "http"
