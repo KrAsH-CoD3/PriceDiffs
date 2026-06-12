@@ -21,6 +21,12 @@
 
 {% block extra_scripts %}
 <script>
+  const URLS = {
+    login: "{% url 'login_page' %}",
+    dashboard: "{% url 'dashboard' %}",
+    apiProducts: "{% url 'list_products' %}",
+    apiEventsPoll: "{% url 'poll_events' %}",
+  };
   const ACCESS = localStorage.getItem('access');
   const PRODUCT_ID = {{ product_id }};
   async function api(path, options = {}) {
@@ -42,7 +48,7 @@
   }
 
   async function loadProduct() {
-    const res = await api('/api/products/'+PRODUCT_ID);
+    const res = await api(URLS.apiProducts + '/' + PRODUCT_ID);
     if (!res.ok) { document.getElementById('content').innerHTML = '<div class="text-center py-20 text-sm text-slate-500">Product not found.</div>'; return; }
     const p = await res.json();
     const snapshots = p.snapshots || [];
@@ -106,8 +112,8 @@
     document.getElementById('content').innerHTML = html;
     document.getElementById('deleteBtn').addEventListener('click', async () => {
       if (!confirm('Delete this product and all its snapshots?')) return;
-      const delRes = await api('/api/products/'+PRODUCT_ID, { method: 'DELETE' });
-      if (delRes.ok || delRes.status === 204) window.location.href = '/dashboard';
+      const delRes = await api(URLS.apiProducts + '/' + PRODUCT_ID, { method: 'DELETE' });
+      if (delRes.ok || delRes.status === 204) window.location.href = URLS.dashboard;
       else alert('Failed to delete product');
     });
 
@@ -118,7 +124,7 @@
   let sseLastId = 0, pollDone = false;
   async function pollEvents() {
     if (pollDone) return;
-    const res = await api('/api/events/poll?last_id='+sseLastId);
+    const res = await api(URLS.apiEventsPoll + '?last_id='+sseLastId);
     if (!res.ok) return setTimeout(pollEvents, 1500);
     const events = await res.json();
     for (const ev of events) {
@@ -136,7 +142,7 @@
     setTimeout(pollEvents, 1500);
   }
 
-  if (!ACCESS) window.location.href = '/login';
+  if (!ACCESS) window.location.href = URLS.login;
   loadProduct();
 </script>
 {% endblock %}

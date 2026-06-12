@@ -44,7 +44,7 @@
       Track any product from any store. PriceDiffs watches prices around the clock so you always buy at the right time.
     </p>
     <div class="reveal visible d2 mt-8 flex items-center justify-center gap-3 flex-wrap">
-      <a href="/register" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-6 py-2.5 rounded-full text-sm font-semibold shadow-lg shadow-emerald-500/20 transition-all hover:shadow-emerald-500/30">
+      <a href="{% url 'register_page' %}" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-6 py-2.5 rounded-full text-sm font-semibold shadow-lg shadow-emerald-500/20 transition-all hover:shadow-emerald-500/30">
         Start tracking free
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
       </a>
@@ -204,11 +204,11 @@
       No credit card required. Email is optional.<br>Just a username and password to get started.
     </p>
     <div class="mt-10 flex items-center justify-center gap-3">
-      <a href="/register" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-7 py-3 rounded-full text-sm font-semibold shadow-lg shadow-emerald-500/20 transition-all hover:shadow-emerald-500/30">
+      <a href="{% url 'register_page' %}" class="inline-flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-7 py-3 rounded-full text-sm font-semibold shadow-lg shadow-emerald-500/20 transition-all hover:shadow-emerald-500/30">
         Get started free
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
       </a>
-      <a href="/login" class="text-sm text-slate-500 hover:text-slate-300 transition-colors">Sign in instead</a>
+      <a href="{% url 'login_page' %}" class="text-sm text-slate-500 hover:text-slate-300 transition-colors">Sign in instead</a>
     </div>
   </div>
 </section>

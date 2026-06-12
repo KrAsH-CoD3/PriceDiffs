@@ -20,8 +20,8 @@
       The page you're looking for doesn't exist or has been moved.
     </p>
     <div class="fade-up d3 flex items-center justify-center gap-3">
-      <a href="/dashboard" class="inline-flex bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-5 py-2 rounded-xl text-sm font-semibold transition-colors">Dashboard</a>
-      <a href="/" class="text-sm text-slate-500 hover:text-slate-300 transition-colors">Go home</a>
+      <a href="{% url 'dashboard' %}" class="inline-flex bg-emerald-500 hover:bg-emerald-400 text-slate-900 px-5 py-2 rounded-xl text-sm font-semibold transition-colors">Dashboard</a>
+      <a href="{% url 'landing' %}" class="text-sm text-slate-500 hover:text-slate-300 transition-colors">Go home</a>
     </div>
   </div>
 </div>

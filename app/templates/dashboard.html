@@ -4,7 +4,7 @@
 
 {% block nav_left %}
 <div class="flex items-center gap-3">
-  <a href="/" class="text-lg font-bold tracking-tight text-slate-100">PriceDiffs</a>
+  <a href="{% url 'landing' %}" class="text-lg font-bold tracking-tight text-slate-100">PriceDiffs</a>
   <span class="text-xs text-slate-600">/</span>
   <span class="text-sm text-slate-400 font-medium">Products</span>
 </div>
@@ -15,11 +15,11 @@
   <span class="avatar">{{ user.username|slice:":1"|upper }}</span>
   <span class="text-sm text-white font-semibold">{{ user.username|capfirst }}</span>
 </span>
-<a href="/add" class="text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600/50 px-4 py-2 rounded-full transition-colors inline-flex items-center gap-1.5">
+<a href="{% url 'add_page' %}" class="text-sm font-medium bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600/50 px-4 py-2 rounded-full transition-colors inline-flex items-center gap-1.5">
   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
   Track new
 </a>
-<a href="/logout" class="text-sm text-slate-400 hover:text-rose-400 border border-slate-700/50 hover:border-rose-400/30 px-4 py-2 rounded-full transition-colors">Sign out</a>
+<a href="{% url 'logout' %}" class="text-sm text-slate-400 hover:text-rose-400 border border-slate-700/50 hover:border-rose-400/30 px-4 py-2 rounded-full transition-colors">Sign out</a>
 {% endblock %}
 
 {% block extra_style %}
@@ -42,6 +42,15 @@
 
 {% block extra_scripts %}
 <script>
+  const URLS = {
+    login: "{% url 'login_page' %}",
+    product: "{% url 'product_page' 0 %}".replace('0', ''),
+    add: "{% url 'add_page' %}",
+    apiAuthMe: "{% url 'auth_me' %}",
+    apiProducts: "{% url 'list_products' %}",
+    apiEventsPoll: "{% url 'poll_events' %}",
+    apiEventsMaxId: "{% url 'scrape_events_max_id' %}",
+  };
   const ACCESS = localStorage.getItem('access');
   async function api(path, options = {}) {
     const headers = { ...options.headers };
@@ -50,21 +59,21 @@
     return fetch(path, { ...options, headers });
   }
   (async () => {
-    if (!ACCESS) { window.location.href = '/login'; return; }
-    const res = await api('/api/auth/me');
-    if (!res.ok) { localStorage.removeItem('access'); localStorage.removeItem('refresh'); window.location.href = '/login'; return; }
+    if (!ACCESS) { window.location.href = URLS.login; return; }
+    const res = await api(URLS.apiAuthMe);
+    if (!res.ok) { localStorage.removeItem('access'); localStorage.removeItem('refresh'); window.location.href = URLS.login; return; }
     loadProducts();
   })();
 
   async function loadProducts() {
     try {
-      const res = await api('/api/products');
+      const res = await api(URLS.apiProducts);
       const products = await res.json();
       const container = document.getElementById('products');
       if (!Array.isArray(products)) { container.innerHTML = '<div class="col-span-full text-center py-16 text-sm text-slate-500">Unexpected response</div>'; return; }
       document.getElementById('productCount').textContent = products.length + ' tracked';
       if (products.length === 0) {
-        container.innerHTML = '<div class="col-span-full text-center py-16 text-sm text-slate-500">Nothing tracked yet. <a href="/add" class="text-emerald-400 underline underline-offset-2">Add your first product</a></div>';
+        container.innerHTML = '<div class="col-span-full text-center py-16 text-sm text-slate-500">Nothing tracked yet. <a href="'+URLS.add+'" class="text-emerald-400 underline underline-offset-2">Add your first product</a></div>';
         return;
       }
       function sym(c) { return c === 'NGN' ? '\u20A6' : '$'; }
@@ -80,7 +89,7 @@
           +'<div class="flex gap-3.5">'
           +(p.image_url ? '<img src="'+p.image_url+'" referrerpolicy="no-referrer" class="w-14 h-14 object-contain rounded-lg shrink-0 bg-slate-700/30" loading="lazy" />' : '<div class="w-14 h-14 rounded-lg shrink-0 bg-slate-700/30 animate-pulse"></div>')
           +'<div class="flex-1 min-w-0">'
-          +'<a href="/product/'+p.id+'" class="text-sm font-semibold text-slate-100 truncate block hover:text-emerald-400 transition-colors" title="'+title+'">'+title+'</a>'
+          +'<a href="'+URLS.product+p.id+'" class="text-sm font-semibold text-slate-100 truncate block hover:text-emerald-400 transition-colors" title="'+title+'">'+title+'</a>'
           +'<div class="flex items-center gap-2 text-xs mt-1">'
           +(p.rating ? '<span class="text-amber-400/90 font-medium">\u2605 '+p.rating+'</span>' : '')
           +'<span class="text-slate-500 truncate">'+host+'</span></div></div>'
@@ -102,7 +111,7 @@
           e.preventDefault();
           const card = btn.closest('[data-id]');
           if (!confirm('Delete this product and all its snapshots?')) return;
-          const delRes = await api('/api/products/'+card.dataset.id, { method: 'DELETE' });
+          const delRes = await api(URLS.apiProducts + '/' + card.dataset.id, { method: 'DELETE' });
           if (delRes.ok || delRes.status === 204) {
             card.style.transition = 'opacity 0.25s, transform 0.25s';
             card.style.opacity = '0'; card.style.transform = 'scale(0.95)';
@@ -110,7 +119,7 @@
               card.remove();
               const remaining = container.querySelectorAll('[data-id]');
               document.getElementById('productCount').textContent = remaining.length + ' tracked';
-              if (remaining.length === 0) container.innerHTML = '<div class="col-span-full text-center py-16 text-sm text-slate-500">Nothing tracked yet. <a href="/add" class="text-emerald-400 underline underline-offset-2">Add your first product</a></div>';
+              if (remaining.length === 0) container.innerHTML = '<div class="col-span-full text-center py-16 text-sm text-slate-500">Nothing tracked yet. <a href="'+URLS.add+'" class="text-emerald-400 underline underline-offset-2">Add your first product</a></div>';
             }, 250);
           } else alert('Failed to delete product');
         });
@@ -136,7 +145,7 @@
   }
   async function pollEvents() {
     try {
-      const res = await api('/api/events/poll?last_id='+sseLastId);
+      const res = await api(URLS.apiEventsPoll + '?last_id='+sseLastId);
       if (!res.ok) return;
       const events = await res.json();
       for (const ev of events) {
@@ -179,7 +188,7 @@
     if (pendingCount > 0) pollTimer = setTimeout(pollEvents, 1500);
   }
   (async () => {
-    try { const res = await api('/api/events/max-id'); if (res.ok) sseLastId = await res.json(); } catch(_) {}
+    try { const res = await api(URLS.apiEventsMaxId); if (res.ok) sseLastId = await res.json(); } catch(_) {}
     pendingCount = document.querySelectorAll('[data-id] .pending-status').length;
     if (pendingCount > 0) pollTimer = setTimeout(pollEvents, 1500);
   })();

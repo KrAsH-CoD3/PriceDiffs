@@ -27,8 +27,13 @@
 {% block extra_scripts %}
 <div id="toast" class="fixed top-4 right-4 z-50 max-w-md border rounded-xl backdrop-blur-sm shadow-2xl p-3.5 text-sm font-medium transition-all duration-300 hidden"></div>
 <script>
+  const URLS = {
+    login: "{% url 'login_page' %}",
+    dashboard: "{% url 'dashboard' %}",
+    apiProducts: "{% url 'list_products' %}",
+  };
   const ACCESS = localStorage.getItem('access');
-  if (!ACCESS) { window.location.href = '/login'; }
+  if (!ACCESS) { window.location.href = URLS.login; }
   function showToast(msg, type) {
     const el = document.getElementById('toast');
     const colors = { info: 'border-slate-600 bg-slate-800 text-slate-200', success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300', error: 'border-rose-500/30 bg-rose-500/10 text-rose-300' };
@@ -49,8 +54,8 @@
     submitBtn.disabled = true; btnLabel.textContent = 'Scraping...';
     const url = e.target.url.value;
     showToast('Scraping started!', 'info');
-    const res = await api('/api/products', { method: 'POST', body: JSON.stringify({ url }) });
-    if (res.ok) { btnLabel.textContent = 'Added!'; setTimeout(() => window.location.href = '/dashboard', 300); }
+    const res = await api(URLS.apiProducts, { method: 'POST', body: JSON.stringify({ url }) });
+    if (res.ok) { btnLabel.textContent = 'Added!'; setTimeout(() => window.location.href = URLS.dashboard, 300); }
     else { showToast('Failed to add product. Check the URL.', 'error'); submitBtn.disabled = false; btnLabel.textContent = 'Add &amp; Scrape'; }
   });
 </script>

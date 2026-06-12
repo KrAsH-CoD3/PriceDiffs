@@ -26,7 +26,7 @@
     </form>
 
     <p class="text-center text-xs text-slate-500 mt-6">
-      No account? <a href="/register" class="text-emerald-400 hover:text-emerald-300 font-medium transition-colors">Create one</a>
+      No account? <a href="{% url 'register_page' %}" class="text-emerald-400 hover:text-emerald-300 font-medium transition-colors">Create one</a>
     </p>
   </div>
 </div>
@@ -34,14 +34,18 @@
 
 {% block extra_scripts %}
 <script>
+  const URLS = {
+    dashboard: "{% url 'dashboard' %}",
+    apiLogin: "{% url 'auth_login' %}",
+  };
   document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.target));
-    const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const res = await fetch(URLS.apiLogin, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
     const json = await res.json();
     if (res.ok) {
       localStorage.setItem('access', json.access); localStorage.setItem('refresh', json.refresh);
-      window.location.href = '/dashboard';
+      window.location.href = URLS.dashboard;
     } else {
       const err = document.getElementById('error');
       err.textContent = json.error || 'Login failed';
