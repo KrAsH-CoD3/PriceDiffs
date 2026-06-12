@@ -33,10 +33,10 @@
     }
   },
   "sample_url": "https://www.konga.com/product/big-soccer-table-game-5x-5-feet-5402092",
-  "success_count": 45,
+  "success_count": 57,
   "failure_count": 0,
   "created_at": "2026-06-10T10:40:59.445556+00:00",
-  "updated_at": "2026-06-11T03:48:35.248055+00:00",
+  "updated_at": "2026-06-12T18:03:25.320909+00:00",
   "last_success": {
     "proxy_on": false,
     "transport": "http"

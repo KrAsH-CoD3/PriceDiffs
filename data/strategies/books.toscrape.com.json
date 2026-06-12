@@ -33,10 +33,10 @@
     }
   },
   "sample_url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
-  "success_count": 54,
+  "success_count": 60,
   "failure_count": 0,
   "created_at": "2026-06-10T03:46:32.881635+00:00",
-  "updated_at": "2026-06-10T22:41:27.085447+00:00",
+  "updated_at": "2026-06-12T18:03:15.168559+00:00",
   "last_success": {
     "proxy_on": false,
     "transport": "browser"
