@@ -1,37 +1,412 @@
 """
-Forge methodology — JSON-LD first, network API second, DOM fallback.
-Powered by CloakBrowser (stealth Chromium).
-
-Phase 1 — Direct HTTP probe for embedded JSON-LD (no browser)
-Phase 1b — Direct HTML extraction from OG/title/price patterns (no browser)
-Phase 2 — Open browser, capture network traffic for API discovery
-Phase 3 — DOM CSS probe fallback
-Phase 4 — Strategy verification and persistence
+Extraction pipeline — per-domain last-success ordering, then fallback.
+JSON-LD, metadata, DOM selector probe, and stealth browser (Scrapling + CloakBrowser) for JS-rendered / Cloudflare sites.
+Proxy on/off is driven by each domain's last successful configuration.
 """
 import asyncio
 import json
 import os
 import re
+import shutil
+import sys
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
-import httpx
-from playwright.async_api import async_playwright
+from dotenv import load_dotenv
+from scrapling.fetchers import AsyncFetcher
 
-CLOAK_BINARY = None
-for p in Path.home().joinpath(".cloakbrowser").glob("chromium-*/chrome"):
-    CLOAK_BINARY = str(p)
-if not CLOAK_BINARY:
-    CLOAK_BINARY = ""
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_PROJECT_ROOT / ".env")
 
-STRATEGIES_DIR = Path(__file__).resolve().parent.parent / "data" / "strategies"
+STRATEGIES_DIR = _PROJECT_ROOT / "data" / "strategies"
 MAX_FAILURES_BEFORE_REDISCOVERY = 2
 
-# Proxy for Cloudflare-protected sites (set via env or before calling forge)
-PROXY_URL = os.environ.get("PRICEDIFF_PROXY", "")
+
+def _parse_proxy_raw(raw: str) -> tuple[str, str, str, str] | None:
+    if not raw:
+        return None
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return None
+    parts = raw.rsplit(":", 3)
+    if len(parts) == 4:
+        host, port, user, pw = parts
+        return host, port, user, pw
+    return None
 
 
-# ── Helpers ────────────────────────────────────────────────────────────
+def _build_proxy_url(country: str = "us") -> str | None:
+    raw = os.environ.get("PRICEDIFF_PROXY", "")
+    if not raw:
+        return None
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+    parsed = _parse_proxy_raw(raw)
+    if not parsed:
+        return None
+    host, port, user, pw = parsed
+    base_pw = pw.replace("_country-ng", "").replace("_country-us", "")
+    return f"http://{user}:{base_pw}_country-{country}@{host}:{port}"
+
+
+PROXY_URL_NG = _build_proxy_url("ng")
+PROXY_URL_US = _build_proxy_url("us")
+_disable_proxy = False
+
+
+def _get_proxy_for_domain(domain: str) -> str | None:
+    """Return the appropriate proxy URL for the given domain.
+    NG proxy: Jumia only (blocks non-Nigerian IPs).
+    US proxy: Amazon/eBay only (curl bypass for captcha + US region)."""
+    d = domain.lower()
+    if "jumia" in d and (d.endswith(".ng") or d.endswith(".com.ng")):
+        return PROXY_URL_NG
+    if d in ("jiji.ng",):
+        return PROXY_URL_NG
+    if d in ("amazon.com", "ebay.com", "m.ebay.com"):
+        return PROXY_URL_US
+    return None
+
+_fetch_cache: dict[str, object] = {}
+_fetch_cache_time: dict[str, float] = {}
+_FETCH_CACHE_TTL = 10.0
+
+# Domains that need curl subprocess (HTTPX TLS fingerprint triggers captcha)
+_CURL_DOMAINS = {"amazon.com", "ebay.com", "m.ebay.com"}
+
+
+async def _curl_fetch(url: str, proxy: str | None = None) -> str | None:
+    import subprocess
+    cmd = ["curl", "-s", "-L", "--connect-timeout", "10", "--max-time", "20"]
+    if proxy:
+        cmd.extend(["--proxy", proxy])
+    cmd.extend([
+        "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "-H", "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "-H", "Accept-Language: en-US,en;q=0.9",
+        url,
+    ])
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=25)
+        if r.returncode == 0 and r.stdout:
+            html = r.stdout.decode("utf-8", errors="replace")
+            if len(html) > 50000 and "captcha" not in html[:2000].lower():
+                return html
+        return None
+    except Exception:
+        return None
+
+
+def _find_chrome() -> str | None:
+    candidates = []
+    system = sys.platform
+    if system == "linux":
+        candidates = [
+            "/home/test/.cloakbrowser/chromium-146.0.7680.177.5/chrome",
+            "/home/test/.cache/ms-playwright/chromium-1217/chrome-linux64/chrome",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+        ]
+    elif system == "darwin":
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "~/.cache/ms-playwright/chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+        ]
+    elif system == "win32":
+        candidates = [
+            os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%PROGRAMFILES(x86)%\Google\Chrome\Application\chrome.exe"),
+        ]
+    for c in candidates:
+        expanded = os.path.expanduser(os.path.expandvars(c))
+        if os.path.isfile(expanded):
+            return expanded
+    if system == "linux":
+        for name in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable"):
+            found = shutil.which(name)
+            if found:
+                return found
+    elif system == "darwin":
+        found = shutil.which("google-chrome") or shutil.which("chromium")
+        if found:
+            return found
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Stealth browser session (Scrapling + CloakBrowser)
+# ---------------------------------------------------------------------------
+
+import platform
+
+_CLOAK_BROWSER_PATH = "/home/test/.cloakbrowser/chromium-146.0.7680.177.5/chrome"
+_CHROME_DEPS = "/home/test/.local/lib/chrome-deps"
+_BROWSER_TIMEOUT = 30
+_OS = platform.system()
+_browser_session = None
+_browser_broken = False
+_browser_fail_count = 0
+_vdisplay = None
+
+
+async def _get_stealth_browser(domain: str):
+    global _browser_session, _browser_broken, _browser_fail_count, _vdisplay
+    if _browser_broken:
+        import time as _t
+        _last_browser_attempt = getattr(_get_stealth_browser, "_last_attempt", 0)
+        if _t.time() - _last_browser_attempt < 120:
+            return None
+        _browser_broken = False
+        _browser_fail_count = 0
+    if _browser_session is not None:
+        return _browser_session
+    if not os.path.isfile(_CLOAK_BROWSER_PATH):
+        _browser_broken = True
+        return None
+    try:
+        from scrapling.fetchers import AsyncStealthySession
+
+        os.environ["LD_LIBRARY_PATH"] = _CHROME_DEPS
+        headless = True
+
+        if os.environ.get("PRICEDIFF_HEADED"):
+            headless = False
+            if _OS == "Linux":
+                if not os.environ.get("DISPLAY"):
+                    try:
+                        from pyvirtualdisplay import Display
+                        _vdisplay = Display(size=(1920, 1080), visible=False)
+                        _vdisplay.start()
+                    except ImportError:
+                        headless = True
+                    except Exception as e:
+                        print(f"  [stealth] Xvfb start failed: {e}")
+                        headless = True
+
+        kwargs = dict(
+            headless=headless,
+            executable_path=_CLOAK_BROWSER_PATH,
+            solve_cloudflare=True,
+            network_idle=False,
+            timeout=20000,
+            proxy=None if _disable_proxy else (_get_proxy_for_domain(domain) or None),
+            extra_flags=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-automation",
+            ],
+            hide_canvas=True,
+            allow_webgl=True,
+        )
+        _browser_session = AsyncStealthySession(**kwargs)
+        await _browser_session.start()
+        _browser_fail_count = 0
+        return _browser_session
+    except Exception as e:
+        import time as _t
+        _get_stealth_browser._last_attempt = _t.time()
+        _browser_broken = True
+        return None
+
+
+async def _close_stealth_browser():
+    global _browser_session, _browser_broken, _browser_fail_count, _vdisplay
+    if _browser_session is not None:
+        try:
+            await _browser_session.close()
+        except Exception:
+            pass
+        _browser_session = None
+    _browser_broken = False
+    _browser_fail_count = 0
+    if _vdisplay is not None:
+        try:
+            _vdisplay.stop()
+        except Exception:
+            pass
+        _vdisplay = None
+
+
+# ---------------------------------------------------------------------------
+# SSR payload extraction (Next.js __NEXT_DATA__, Nuxt __NUXT__, RSC chunks)
+# ---------------------------------------------------------------------------
+
+async def _extract_from_ssr_payload(html: str, url: str) -> dict | None:
+    """Extract product data from server-rendered JS payloads."""
+    domain = get_domain(url)
+
+    # Next.js __NEXT_DATA__
+    nd = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*type="application/json"[^>]*>(.*?)</script>', html, re.DOTALL)
+    if nd:
+        try:
+            data = json.loads(nd.group(1))
+            props = data.get("props", {}).get("pageProps", {})
+            product = props.get("product") or props.get("item") or props.get("listing") or {}
+            if not product:
+                product = _find_product_in_jsonld(props)
+            if product:
+                title = product.get("name") or product.get("title") or ""
+                price_raw = None
+                off = product.get("offers", {})
+                if isinstance(off, dict):
+                    price_raw = off.get("price") or off.get("priceSpecification", {}).get("price")
+                elif isinstance(off, list) and off:
+                    price_raw = off[0].get("price") or off[0].get("priceSpecification", {}).get("price")
+                if not price_raw:
+                    price_raw = product.get("price") or product.get("amount") or product.get("priceAmount")
+                if isinstance(price_raw, str):
+                    price_raw = float(price_raw.replace(",", ""))
+                if isinstance(price_raw, (int, float)) and 1.0 < price_raw < 10_000_000_000:
+                    image = product.get("image", "")
+                    if isinstance(image, list):
+                        image = image[0] if image else ""
+                    if isinstance(image, dict):
+                        image = image.get("url") or image.get("src") or ""
+                    if image and not urlparse(image).netloc:
+                        image = urljoin(url, image)
+                    rating = product.get("aggregateRating", {}).get("ratingValue", "")
+                    currency = off.get("priceCurrency", "NGN") if isinstance(off, dict) else "NGN"
+                    return {
+                        "title": title, "price": float(price_raw),
+                        "rating": str(rating), "image_url": image, "currency": currency,
+                    }
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            pass
+
+    # Nuxt.js __NUXT__
+    nu = re.search(r'<script[^>]*>window\.__NUXT__\s*=\s*(\{.*?\});</script>', html, re.DOTALL)
+    if nu:
+        try:
+            data = json.loads(nu.group(1))
+            deep = data
+            for key in ("data", "0", "product"):
+                if isinstance(deep, dict):
+                    deep = deep.get(key, deep)
+            product = deep if isinstance(deep, dict) and ("name" in deep or "price" in deep) else None
+            if product:
+                title = product.get("name") or product.get("title") or ""
+                price_raw = product.get("price") or product.get("offers", {}).get("price")
+                if isinstance(price_raw, str):
+                    price_raw = float(price_raw.replace(",", ""))
+                if isinstance(price_raw, (int, float)) and 1.0 < price_raw < 10_000_000_000:
+                    image = product.get("image", "")
+                    if isinstance(image, list):
+                        image = image[0] if image else ""
+                    if image and not urlparse(image).netloc:
+                        image = urljoin(url, image)
+                    return {"title": title, "price": float(price_raw), "rating": "", "image_url": image, "currency": "NGN"}
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            pass
+
+    # React Server Components (RSC) — self.__next_f.push(...)
+    rsc = re.findall(r'self\.__next_f\.push\(\[.*?,"(.*?)"\]\)', html, re.DOTALL)
+    if rsc:
+        combined = "".join(rsc)
+        combined = combined.replace("\\\"", "\"").replace("\\n", "").replace("\\\\", "\\")
+        # Look for price in the RSC stream
+        for pat, group, hint in [
+            (r'"(?:price|Price|amount)"\s*:\s*([0-9.]+)', 1, ""),
+            (r'>\u20a6\s*([0-9,]+(?:\.[0-9]+)?)<', 1, "ngn"),
+            (r'>\$([0-9,]+(?:\.[0-9]+)?)<', 1, "usd"),
+        ]:
+            m = re.search(pat, combined)
+            if m:
+                try:
+                    v = float(m.group(group).replace(",", ""))
+                    if 1.0 < v < 10_000_000_000:
+                        title = ""
+                        for tpat in [r'"name"\s*:\s*"([^"]+)"', r'"title"\s*:\s*"([^"]+)"', r'<title[^>]*>([^<]+)</title>']:
+                            tm = re.search(tpat, combined)
+                            if tm:
+                                title = tm.group(1)[:120]
+                                break
+                        if not title:
+                            tm = re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"', html)
+                            if tm:
+                                title = tm.group(1)[:120]
+                        if title:
+                            return {"title": title, "price": v, "rating": "", "image_url": "", "currency": "NGN"}
+                except (ValueError, IndexError):
+                    pass
+
+    return None
+
+
+async def _try_stealth_fetch(url: str, domain: str | None = None) -> dict | None:
+    """Fallback: fetch rendered HTML via CloakBrowser + Scrapling stealth session."""
+    global _browser_broken, _browser_fail_count
+    if domain is None:
+        domain = get_domain(url)
+    browser = await _get_stealth_browser(domain)
+    if browser is None:
+        return None
+    try:
+        resp = await asyncio.wait_for(browser.fetch(url, network_idle=True, timeout=25000), timeout=_BROWSER_TIMEOUT)
+    except asyncio.TimeoutError:
+        await _close_stealth_browser()
+        return None
+    except Exception:
+        await _close_stealth_browser()
+        return None
+    _browser_fail_count = 0
+    if resp is None or resp.status >= 400:
+        return None
+    try:
+        html = resp.body.decode(resp.encoding or "utf-8", errors="replace")
+    except Exception:
+        return None
+    if not html or len(html) < 500:
+        return None
+
+    domain = get_domain(url)
+
+    # Use the browser-fetched HTML directly instead of re-fetching
+    result = await _extract_jsonld(domain, url, html)
+    if result:
+        fields = result.get("api", {}).get("fields", {})
+        p = float(fields.get("price", 0))
+        t = fields.get("title", "")
+        if t and p > 0:
+            return {
+                "title": t,
+                "price": p,
+                "rating": fields.get("rating", ""),
+                "image_url": fields.get("image_url", ""),
+                "currency": fields.get("currency", "NGN"),
+            }
+
+    # Probe Next.js / Nuxt / RSC data payloads
+    next_data = await _extract_from_ssr_payload(html, url)
+    if next_data:
+        return next_data
+
+    result = _parse_metadata_from_html(domain, url, html)
+    if result:
+        fields = result.get("api", {}).get("fields", {})
+        p = float(fields.get("price", 0))
+        t = fields.get("title", "")
+        if t and p > 0:
+            return {
+                "title": t,
+                "price": p,
+                "rating": fields.get("rating", ""),
+                "image_url": fields.get("image_url", ""),
+                "currency": fields.get("currency", "NGN"),
+            }
+
+    strategy = await _probe_dom_selectors(domain, url)
+    if strategy:
+        data = await _extract_using_dom_strategy(url, strategy)
+        if data and _acceptable_data(data):
+            return data
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Domain & strategy persistence
+# ---------------------------------------------------------------------------
 
 def get_domain(url: str) -> str:
     return urlparse(url).netloc.removeprefix("www.")
@@ -57,7 +432,7 @@ def needs_rediscovery(strategy: dict) -> bool:
     return strategy.get("failure_count", 0) > MAX_FAILURES_BEFORE_REDISCOVERY
 
 
-def _save_meta(strategy: dict):
+def _update_timestamps(strategy: dict):
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
     if not strategy.get("created_at"):
@@ -66,225 +441,260 @@ def _save_meta(strategy: dict):
     save_strategy(strategy)
 
 
-def mark_success(strategy: dict):
+def mark_success(strategy: dict, proxy_on: bool = False, transport: str = "http"):
     strategy["success_count"] = strategy.get("success_count", 0) + 1
     strategy["failure_count"] = 0
-    _save_meta(strategy)
+    strategy["last_success"] = {"proxy_on": proxy_on, "transport": transport}
+    _update_timestamps(strategy)
 
 
 def mark_failure(strategy: dict):
     strategy["failure_count"] = strategy.get("failure_count", 0) + 1
-    _save_meta(strategy)
+    _update_timestamps(strategy)
 
 
-# ─── CloakBrowser browser — single instance across sessions ─────────────
+# ---------------------------------------------------------------------------
+# HTTP fetch with in-memory cache
+# ---------------------------------------------------------------------------
 
-_browser_instance = None
-_playwright_instance = None
+async def _fetch_with_cache(url: str, domain: str | None = None, **kwargs) -> object | None:
+    import time
+    now = time.monotonic()
+    if domain is None:
+        domain = get_domain(url)
+    proxy = None if _disable_proxy else _get_proxy_for_domain(domain)
+    cache_key = f"{url}::proxy={proxy or 'none'}"
+    cached = _fetch_cache.get(cache_key)
+    cached_at = _fetch_cache_time.get(cache_key, 0)
+    if cached is not None and (now - cached_at) < _FETCH_CACHE_TTL:
+        return cached
 
+    # For captcha-prone domains, try curl subprocess first (bypasses HTTPX TLS fingerprint)
+    if domain in _CURL_DOMAINS:
+        html = await _curl_fetch(url, proxy)
+        if html:
+            from scrapling.engines.toolbelt.custom import Response
+            resp = Response(url=url, content=html, status=200, reason="OK",
+                            cookies={}, headers={}, request_headers={}, encoding="utf-8")
+            _fetch_cache[cache_key] = resp
+            _fetch_cache_time[cache_key] = now
+            return resp
 
-async def _get_browser():
-    global _browser_instance, _playwright_instance
-    if _browser_instance and _browser_instance.is_connected():
-        return _browser_instance
-    try:
-        _playwright_instance = await async_playwright().start()
-        launch_kwargs = {
-            "executable_path": CLOAK_BINARY,
-            "headless": True,
-            "args": ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
-        }
-        if PROXY_URL:
-            parsed = urlparse(PROXY_URL)
-            proxy_config = {"server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"}
-            if parsed.username:
-                proxy_config["username"] = parsed.username
-            if parsed.password:
-                proxy_config["password"] = parsed.password
-            launch_kwargs["proxy"] = proxy_config
-        _browser_instance = await _playwright_instance.chromium.launch(**launch_kwargs)
-        return _browser_instance
-    except Exception:
-        if _playwright_instance:
-            try:
-                await _playwright_instance.stop()
-            except Exception:
-                pass
-            _playwright_instance = None
-        _browser_instance = None
-        return None
-
-
-async def _close_browser():
-    global _browser_instance, _playwright_instance
-    if _browser_instance:
+    for attempt in range(3):
         try:
-            await _browser_instance.close()
+            resp = await AsyncFetcher.get(url, proxy=proxy or None, **kwargs)
+            if resp.status == 429 and attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            if resp.status < 400:
+                _fetch_cache[cache_key] = resp
+                _fetch_cache_time[cache_key] = now
+                return resp
+            return resp
         except Exception:
-            pass
-        _browser_instance = None
-    if _playwright_instance:
-        try:
-            await _playwright_instance.stop()
-        except Exception:
-            pass
-        _playwright_instance = None
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# PHASE 2 — CAPABILITY EXPLORATION
-# Priority: API endpoints → JS runtime → DOM
-# ═══════════════════════════════════════════════════════════════════════
-
-async def forge_strategy(url: str) -> dict | None:
-    """Full discovery workflow.
-
-    1. Probe page with direct HTTP for embedded JSON-LD (fast path)
-    2. Direct HTML extraction via OG tags / price patterns (no browser)
-    3. Open page with CloakBrowser, capture network traffic
-    4. Inspect XHR/fetch responses for product data APIs
-    5. If no API → DOM probe → save DOM strategy
-    6. Verify strategy works before returning
-    """
-    domain = get_domain(url)
-
-    # ── Phase 2a: Direct HTTP probe for JSON-LD (no browser needed) ──
-    strategy = await _try_jsonld_from_http(domain, url)
-    if strategy:
-        print(f"  [forge] JSON-LD strategy found for {domain} via HTTP")
-        _save_meta(strategy)
-        return strategy
-
-    # ── Phase 2b: Direct HTML extraction (Cloudflare-safe fallback) ──
-    # For sites where JSON-LD is absent but product data lives in OG tags,
-    # heading elements, or structured HTML patterns.  No browser needed.
-    strategy = await _try_html_extraction(domain, url)
-    if strategy:
-        print(f"  [forge] HTML extraction strategy found for {domain}")
-        _save_meta(strategy)
-        return strategy
-
-    # ── Phase 2c: Browser-based exploration ──────────────────────────
-    browser = await _get_browser()
-    if not browser:
-        print(f"  [forge] Browser unavailable, skipping {domain}")
-        return None
-    page = await browser.new_page()
-    responses = []
-
-    async def on_response(resp):
-        responses.append({
-            "url": resp.url,
-            "status": resp.status,
-            "method": resp.request.method,
-            "headers": resp.headers,
-            "request_headers": resp.request.headers,
-            "body": await safe_text(resp),
-        })
-
-    page.on("response", on_response)
-
-    try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        await page.wait_for_timeout(2000)
-    except Exception as e:
-        print(f"  [forge] Page load error: {e}")
-        await page.close()
-        return None
-
-    # ── Phase 2d: API endpoint discovery ─────────────────────────────
-    strategy = _discover_api_from_responses(domain, url, responses)
-    if strategy:
-        print(f"  [forge] API strategy found for {domain}, verifying...")
-        await page.close()
-        if await _verify_strategy(url, strategy):
-            _save_meta(strategy)
-            return strategy
-        print(f"  [forge] API verification failed, falling back to DOM")
-        # Re-create page (was closed during verify) and navigate
-        page = await browser.new_page()
-        try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            await page.wait_for_timeout(2000)
-        except Exception:
-            await page.close()
+            if attempt < 2:
+                await asyncio.sleep(1)
+                continue
             return None
-
-    # ── Phase 2e: DOM fallback — probe CSS selectors ─────────────────
-    print(f"  [forge] Probing DOM selectors for {domain}...")
-    strategy = await _discover_dom(domain, url, page)
-    await page.close()
-    if strategy and await _verify_strategy(url, strategy):
-        _save_meta(strategy)
-        return strategy
-
     return None
 
 
-async def safe_text(resp) -> str:
-    """Safely read response body, return empty string on error."""
-    try:
-        return await resp.text()
-    except Exception:
-        return ""
+# ---------------------------------------------------------------------------
+# HTML helpers
+# ---------------------------------------------------------------------------
+
+def _decode_response(resp) -> str:
+    return resp.body.decode(resp.encoding or "utf-8", errors="replace")
 
 
-# ── Phase 2a — Direct HTTP probe for embedded JSON-LD ──────────────────
+def _strip_scripts(html: str) -> str:
+    return re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL)
 
-async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
-    """Fetch page via plain HTTP and extract JSON-LD structured data.
-    
-    Tries without proxy first (faster for unprotected sites),
-    then retries with proxy if configured.
-    """
-    proxy_candidates = [None]
-    if PROXY_URL:
-        proxy_candidates.append(PROXY_URL)
-    html = None
-    for proxy_url in proxy_candidates:
+
+def _first_element(elements: object) -> object | None:
+    if elements and len(elements) > 0:
+        return elements[0]
+    return None
+
+
+# ---------------------------------------------------------------------------
+# JSON-LD extraction
+# ---------------------------------------------------------------------------
+
+def _find_product_in_jsonld(data):
+    if isinstance(data, dict):
+        if data.get("@type") == "Product":
+            return data
+        if data.get("mainEntity", {}).get("@type") == "Product":
+            return data["mainEntity"]
+        graph = data.get("@graph")
+        if isinstance(graph, list):
+            for item in graph:
+                if isinstance(item, dict) and item.get("@type") == "Product":
+                    return item
+        for val in data.values():
+            result = _find_product_in_jsonld(val)
+            if result:
+                return result
+    elif isinstance(data, list):
+        for item in data:
+            result = _find_product_in_jsonld(item)
+            if result:
+                return result
+    return None
+
+
+def _parse_price_from_text(text: str) -> float | None:
+    match = re.search(r"[\u20a6$€£]\s*([0-9,]+(?:\.[0-9]{1,2})?)", text)
+    if not match:
+        match = re.search(r"([0-9,]+(?:\.[0-9]{1,2})?)\s*[\u20a6$€£]", text)
+    if match:
         try:
-            timeout_val = 30 if proxy_url else 15
-            kwargs = {"proxy": proxy_url} if proxy_url else {}
-            async with httpx.AsyncClient(follow_redirects=True, timeout=timeout_val, **kwargs) as client:
-                resp = await client.get(url, headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                })
-                resp.raise_for_status()
-                html = resp.text
-        except Exception:
-            if proxy_url == PROXY_URL:
-                return None
-            continue
+            v = float(match.group(1).replace(",", ""))
+            if 1.0 < v < 10_000_000_000:
+                return v
+        except ValueError:
+            pass
+    return None
+
+
+def _detect_currency(text: str) -> str:
+    if "\u20a6" in text or "NGN" in text:
+        return "NGN"
+    if "\u00a3" in text:
+        return "GBP"
+    if "\u20ac" in text:
+        return "EUR"
+    if "$" in text:
+        return "USD"
+    return "USD"
+
+
+_CURRENCY_BY_SYMBOL = {"\u20a6": "NGN", "\u00a3": "GBP", "\u20ac": "EUR", "$": "USD"}
+
+_DOMAIN_CURRENCY = {
+    "amazon.com": "USD",
+    "amazon.co.uk": "GBP",
+    "amazon.de": "EUR",
+    "amazon.fr": "EUR",
+    "amazon.it": "EUR",
+    "amazon.es": "EUR",
+    "amazon.ca": "CAD",
+    "amazon.com.au": "AUD",
+    "amazon.co.jp": "JPY",
+    "jumia.com.ng": "NGN",
+    "konga.com": "NGN",
+    "simsng.com": "NGN",
+    "agbeke.com": "NGN",
+    "slot.ng": "NGN",
+    "kara.com.ng": "NGN",
+    "ajebomarket.com": "NGN",
+}
+
+
+def _currency_from_match(html: str, match: re.Match, pattern_key: str, domain: str = "") -> str:
+    key_map = {"ngn": "NGN", "gbp": "GBP", "eur": "EUR", "usd": "USD"}
+    lower = pattern_key.lower()
+    for k, v in key_map.items():
+        if k in lower:
+            return v
+
+    match_text = match.group(0)
+    for sym, cur in _CURRENCY_BY_SYMBOL.items():
+        if sym in match_text:
+            return cur
+
+    start = max(0, match.start() - 800)
+    end = min(len(html), match.end() + 200)
+    context = html[start:end]
+    for sym, cur in _CURRENCY_BY_SYMBOL.items():
+        if sym in context:
+            return cur
+
+    if domain in _DOMAIN_CURRENCY:
+        return _DOMAIN_CURRENCY[domain]
+    return _detect_currency(html)
+
+
+# ---------------------------------------------------------------------------
+# PROBE PHASE 1: JSON-LD embedded in HTML
+# ---------------------------------------------------------------------------
+
+async def _extract_jsonld(domain: str, url: str, html: str | None = None) -> dict | None:
     if html is None:
+        resp = await _fetch_with_cache(url, domain=domain, timeout=30000)
+        if resp is None or resp.status >= 400:
+            return None
+        html = _decode_response(resp)
+    if not html:
         return None
 
-    import re
     ld_pattern = r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>'
     for m in re.finditer(ld_pattern, html, re.DOTALL):
         try:
             data = json.loads(m.group(1))
         except json.JSONDecodeError:
             continue
-        product = _drill_to_product(data)
+        product = _find_product_in_jsonld(data)
         if not product:
             continue
         name = product.get("name", "")
         offers = product.get("offers", {})
+
+        def _extract_price_and_currency(offer):
+            if not isinstance(offer, dict):
+                return None, "NGN"
+            ot = offer.get("@type", "")
+            if ot == "AggregateOffer":
+                low = offer.get("lowPrice") or offer.get("lowprice")
+                high = offer.get("highPrice") or offer.get("highprice")
+                if low:
+                    return low, offer.get("priceCurrency", "USD")
+                if not low and not high:
+                    return None, "NGN"
+                return None, "NGN"
+            price = offer.get("price")
+            currency = offer.get("priceCurrency", "NGN")
+            spec = offer.get("priceSpecification")
+            # Prefer sale price from priceSpecification when available
+            if price and isinstance(spec, dict):
+                spec_type = spec.get("@type", "")
+                spec_price = spec.get("price")
+                if spec_price and (spec_type == "UnitPriceSpecification" or spec.get("priceType") == "SalePrice"):
+                    return spec_price, spec.get("priceCurrency") or currency
+            return price, currency
+
         if isinstance(offers, list):
-            offers = offers[0] if offers else {}
-        currency_code = "NGN"
-        if isinstance(offers, dict):
-            currency_code = offers.get("priceCurrency", "NGN")
-        elif isinstance(offers, list) and offers:
-            currency_code = offers[0].get("priceCurrency", "NGN")
-        price_raw = offers.get("price") if isinstance(offers, dict) else None
-        if price_raw is None and isinstance(offers, dict):
-            spec = offers.get("priceSpecification")
-            if isinstance(spec, list):
-                price_raw = spec[0].get("price") if spec else None
-            elif isinstance(spec, dict):
-                price_raw = spec.get("price")
-        if not name or price_raw is None:
+            best_price = None
+            best_currency = "NGN"
+            for offer in offers:
+                p, c = _extract_price_and_currency(offer)
+                if p is not None:
+                    try:
+                        pv = float(p.replace(",", "")) if isinstance(p, str) else float(p)
+                    except (ValueError, TypeError):
+                        continue
+                    if best_price is None or pv < best_price:
+                        best_price = pv
+                        best_currency = c
+            if best_price is None:
+                continue
+            price_raw = best_price
+            currency_code = best_currency
+        else:
+            price_raw, currency_code = _extract_price_and_currency(offers)
+            if price_raw is None:
+                currency_code = "NGN"
+                price_raw = None
+            if price_raw is None:
+                continue
+            if isinstance(price_raw, str):
+                price_raw_val = float(price_raw.replace(",", ""))
+            else:
+                price_raw_val = float(price_raw)
+            price_raw = price_raw_val
+
+        if not name:
             continue
 
         if isinstance(price_raw, str):
@@ -314,16 +724,13 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
         return {
             "domain": domain,
             "site_name": domain.split(".")[0].capitalize(),
-            "strategy_type": "api",
+            "strategy_type": "jsonld",
             "api": {
                 "endpoint": url,
                 "method": "GET",
                 "req_headers": {},
-                "field_mapping": {
-                    k: ["jsonld", k]
-                    for k in ("title", "price", "rating", "image_url")
-                },
-                "_jsonld_fields": {
+                "field_mapping": {k: ["jsonld", k] for k in ("title", "price", "rating", "image_url")},
+                "fields": {
                     "title": name,
                     "price": price,
                     "rating": str(rating),
@@ -338,28 +745,218 @@ async def _try_jsonld_from_http(domain: str, url: str) -> dict | None:
     return None
 
 
-# ── Phase 1b — Direct HTML extraction (Cloudflare-safe no-browser fallback) ──
+# ---------------------------------------------------------------------------
+# Image extraction helpers (multiple fallbacks)
+# ---------------------------------------------------------------------------
 
-async def _try_html_extraction(domain: str, url: str) -> dict | None:
-    """Extract product data from raw HTML using OG tags, headings, and price patterns.
+def _extract_image_from_jsonld(html: str, url: str) -> str:
+    for m in re.finditer(r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>', html, re.DOTALL):
+        try:
+            data = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            continue
+        # Walk the JSON tree looking for any "image" field
+        stack = [data]
+        visited = set()
+        while stack:
+            node = stack.pop()
+            node_id = id(node)
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+            if isinstance(node, dict):
+                img = node.get("image")
+                if img and isinstance(img, str) and img.startswith("http"):
+                    if "#" in img:
+                        img = img.split("#")[0]
+                    return img
+                if isinstance(img, dict):
+                    val = img.get("contentUrl") or img.get("url") or img.get("@id") or ""
+                    if isinstance(val, str) and val.startswith("http"):
+                        if "#" in val:
+                            val = val.split("#")[0]
+                        return val
+                if isinstance(img, list):
+                    for item in img:
+                        if isinstance(item, str) and item.startswith("http"):
+                            if "#" in item:
+                                item = item.split("#")[0]
+                            return item
+                        if isinstance(item, dict):
+                            val = item.get("contentUrl") or item.get("url") or item.get("@id") or ""
+                            if isinstance(val, str) and val.startswith("http"):
+                                return val
+                for v in node.values():
+                    if isinstance(v, (dict, list)):
+                        stack.append(v)
+            elif isinstance(node, list):
+                stack.extend(node)
+    return ""
 
-    Works on Cloudflare-protected sites where the browser crashes but httpx
-    successfully fetches the HTML.  No browser needed.
-    """
-    try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
-            resp = await client.get(url, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            })
-            resp.raise_for_status()
-            html = resp.text
-    except Exception:
+
+def _extract_image_from_embedded_json(html: str) -> str:
+    for m in re.finditer(r'<script[^>]*>(.*?)</script>', html, re.DOTALL):
+        raw = m.group(1).strip()
+        if not raw.startswith(("{", "[")):
+            continue
+        candidates = []
+        for key in ("hiRes", "large", "mainUrl", "imageURL"):
+            for match in re.finditer(rf'"{key}"\s*:\s*"([^"]+)"', raw):
+                val = match.group(1)
+                if val.startswith("http") and ("amazon" in val or ".jpg" in val or ".png" in val):
+                    candidates.append(val.replace("\\u0026", "&"))
+        if candidates:
+            return candidates[0]
+    return ""
+
+
+def _extract_image_from_html_attrs(html: str) -> str:
+    m = re.search(r'id="landingImage"[^>]+src="([^"]+)"', html)
+    if m:
+        return m.group(1)
+    m = re.search(r'id="imgTagWrapperId"[^>]*>.*?<img[^>]+src="([^"]+)"', html, re.DOTALL)
+    if m:
+        return m.group(1)
+    m = re.search(r'(https://m\.media-amazon\.com/images/I/[^")\s]+(?:\.jpg|\.png|\.webp))', html)
+    if m:
+        url = m.group(1)
+        if "_AC_SL" in url or "_AC_US" in url:
+            return url
+        url = re.sub(r'\.__AC_[^.]*', '._AC_SL1500_', url)
+        return url
+    imgs = re.findall(r'<img[^>]+src="(https?://[^"]*\.(?:jpg|jpeg|png|webp|gif)[^"]*)"', html)
+    for src in imgs:
+        if "logo" not in src.lower() and "icon" not in src.lower() and "banner" not in src.lower():
+            return src
+    return ""
+
+
+def _extract_image_from_other_meta(html: str) -> str:
+    m = re.search(r'<meta[^>]+name="twitter:image"[^>]+content="([^"]+)"', html)
+    if m:
+        return m.group(1)
+    m = re.search(r'<link[^>]+rel="image_src"[^>]+href="([^"]+)"', html)
+    if m:
+        return m.group(1)
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# PROBE PHASE 2: OG / meta / title tag extraction
+# ---------------------------------------------------------------------------
+
+def _extract_title_from_jsonld(html: str) -> str:
+    ld_pattern = r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>'
+    for m in re.finditer(ld_pattern, html, re.DOTALL):
+        try:
+            data = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            continue
+        product = _find_product_in_jsonld(data)
+        if product:
+            name = product.get("name", "")
+            if name and len(name) > 3:
+                return name
+    return ""
+
+
+def _extract_price_from_jsonld(html: str) -> tuple:
+    ld_pattern = r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>'
+    for m in re.finditer(ld_pattern, html, re.DOTALL):
+        try:
+            data = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            continue
+        product = _find_product_in_jsonld(data)
+        if not product:
+            continue
+        offers = product.get("offers", {})
+
+        def _extract_offer_price(offer):
+            if not isinstance(offer, dict):
+                return None, ""
+            ot = offer.get("@type", "")
+            if ot == "AggregateOffer":
+                low = offer.get("lowPrice") or offer.get("lowprice")
+                if low:
+                    return low, offer.get("priceCurrency", "")
+                return None, ""
+            price_raw = offer.get("price")
+            currency = offer.get("priceCurrency", "")
+            spec = offer.get("priceSpecification")
+            if price_raw and isinstance(spec, dict):
+                spec_price = spec.get("price")
+                if spec_price and (spec.get("priceType") == "SalePrice" or spec.get("@type") == "UnitPriceSpecification"):
+                    return spec_price, spec.get("priceCurrency") or currency
+            return price_raw, currency
+
+        if isinstance(offers, list):
+            best_price = None
+            best_cur = ""
+            for offer in offers:
+                p, c = _extract_offer_price(offer)
+                if p is not None:
+                    try:
+                        pv = float(p.replace(",", "")) if isinstance(p, str) else float(p)
+                    except (ValueError, TypeError):
+                        continue
+                    if 1.0 < pv < 10_000_000_000 and (best_price is None or pv < best_price):
+                        best_price = pv
+                        best_cur = c
+            if best_price is not None:
+                return float(best_price), best_cur
+        else:
+            price_raw, currency = _extract_offer_price(offers)
+            if price_raw is not None:
+                if isinstance(price_raw, str):
+                    price_raw = float(price_raw.replace(",", ""))
+                if isinstance(price_raw, (int, float)) and 1.0 < price_raw < 10_000_000_000:
+                    return float(price_raw), currency
+    return None, ""
+
+
+def _looks_like_product_title(text: str, url: str) -> bool:
+    """Reject h1 text if it looks like a category/heading, not a product name."""
+    if len(text) < 5:
+        return False
+    url_words = set(re.findall(r'[a-z0-9]+', url.lower().split("/")[-1]))
+    # dp/B0FL4HLJ56 — no meaningful words, trust h1
+    if not url_words or all(len(w) <= 2 for w in url_words):
+        return True
+    text_words = set(re.findall(r'[a-z0-9]+', text.lower()))
+    # Remove generic store words for overlap check
+    generic = {"shop", "store", "online", "shopping", "category", "browse", "home"}
+    text_meaningful = text_words - generic
+    if len(text_meaningful) < 2:
+        return False
+    overlap = url_words & text_meaningful
+    if len(overlap) >= 2:
+        return True
+    category_indicators = {"all", "page", "view", "brands", "products", "search", "results"}
+    if text_meaningful & category_indicators:
+        return False
+    return False
+
+
+def _extract_price_from_rsc(html: str) -> float | None:
+    """Extract price from React Server Components (RSC) payloads."""
+    rsc = re.findall(r'self\.__next_f\.push\(\[.*?,"(.*?)"\]\)', html, re.DOTALL)
+    if not rsc:
         return None
+    combined = "".join(rsc).replace("\\\"", "\"").replace("\\n", "").replace("\\\\", "\\")
+    for pat in [r'"(?:price|Price|amount)"\s*:\s*"?([0-9.]+)"?', r'>\u20a6\s*([0-9,]+(?:\.[0-9]+)?)<']:
+        m = re.search(pat, combined)
+        if m:
+            try:
+                v = float(m.group(1).replace(",", ""))
+                if 1.0 < v < 10_000_000_000:
+                    return v
+            except ValueError:
+                pass
+    return None
 
-    if not html or len(html) < 500:
-        return None
 
-    # Title: og:title > h1 > <title>
+def _parse_metadata_from_html(domain: str, url: str, html: str) -> dict | None:
     title = ""
     og_m = re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"', html)
     if og_m:
@@ -367,77 +964,132 @@ async def _try_html_extraction(domain: str, url: str) -> dict | None:
     if not title:
         h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.DOTALL)
         if h1_m:
-            title = re.sub(r'<[^>]+>', '', h1_m.group(1)).strip()
+            h1_text = re.sub(r'<[^>]+>', '', h1_m.group(1)).strip()
+            if _looks_like_product_title(h1_text, url):
+                title = h1_text
+    if not title and "Product" in html:
+        jld_name = _extract_title_from_jsonld(html)
+        if jld_name:
+            title = jld_name
     if not title:
         t_m = re.search(r'<title[^>]*>(.*?)</title>', html, re.DOTALL)
         if t_m:
-            title = re.sub(r'<[^>]+>', '', t_m.group(1)).strip()
+            raw = re.sub(r'<[^>]+>', '', t_m.group(1)).strip()
+            raw = re.sub(r'\s*\|.*$', '', raw).strip()
+            # Strip common site prefixes like "Amazon.com: "
+            raw = re.sub(r'^[A-Za-z0-9.-]+\.[a-z]{2,}:\s*', '', raw).strip()
+            title = raw
+        else:
+            return None
     title = title.replace("&#x20;", " ").replace("&amp;", "&").strip()[:120]
-
     if not title or "whoops" in title.lower() or "404" in title.lower() or len(title) < 3:
         return None
 
-    # Price: og:price > structured price patterns
     price = None
+    matched_currency = ""
+
     og_p = re.search(r'<meta[^>]+property="product:price:amount"[^>]+content="([^"]+)"', html)
     if og_p:
         try:
             price = float(og_p.group(1).replace(",", ""))
+            matched_currency = _currency_from_match(html, og_p, "og_price")
         except ValueError:
             price = None
 
     if not price:
-        _patterns = [
-            (r'[\u20a6]\s*([0-9,]+(?:\.[0-9]{1,2})?)', 1),
-            (r'NGN[\s:]*([0-9,]+(?:\.[0-9]{1,2})?)', 1),
-            (r'twitter:data1"\s+value="(?:[A-Z]{3}\s+)?([0-9,]+(?:\.[0-9]{1,2})?)"\s*/?', 1),
-            (r'[Pp]rice[^<]{0,40}?([0-9,]+(?:\.[0-9]{1,2})?)', 1),
-            (r'"(?:price|Price|amount)"\s*:\s*"(?:[A-Z]{3}\s+)?([0-9,]+(?:\.[0-9]{1,2})?)"', 1),
-            (r'"(?:price|Price)"\s*:\s*([0-9.]+)', 1),
+        jld_price, jld_cur = _extract_price_from_jsonld(html)
+        if jld_price is not None:
+            price = jld_price
+            matched_currency = jld_cur
+
+    if not price:
+        price_patterns = [
+            # Site-specific reliable patterns FIRST
+            # eBay: data-testid="x-price" (modern eBay, desktop + mobile)
+            (r'data-testid="x-price"[^>]*>\s*\$?\s*([0-9,]+(?:\.[0-9]{1,2})?)', 1, "usd"),
+            # eBay: itemprop="price" content="..." microdata
+            (r'itemprop="price"[^>]*content="([0-9.,]+)"', 1, "usd"),
+            # eBay mobile: class containing display-price / eBay desktop prd-price
+            (r'class="[^"]*(?:display-price|prd-price|price-value)[^"]*"[^>]*>\$?\s*([0-9,]+(?:\.[0-9]{1,2})?)', 1, "usd"),
+            # eBay: vi-price in JSON payload
+            (r'"vi-price"[^}]*"value"\s*:\s*"([0-9.]+)"', 1, "usd"),
+            # Amazon: a-price offscreen
+            (r'class="[^"]*a-price[^"]*"[^>]*>[\s\S]*?<span[^>]*class="[^"]*a-offscreen[^"]*"[^>]*>\$?\s*([0-9,]+(?:\.[0-9]{1,2})?)', 1, "usd"),
+            # NGN / Naira patterns
+            (r'>\u20a6\s*([0-9,]+(?:\.[0-9]+)?)<', 1, "ngn"),
+            (r'[\u20a6]\s*([0-9,]+(?:\.[0-9]{1,2})?)', 1, "ngn"),
+            (r'NGN[\s:]*([0-9,]+(?:\.[0-9]{1,2})?)', 1, "ngn"),
+            # GBP, EUR
+            (r'\u00a3\s*([0-9,]+(?:\.[0-9]{1,2})?)', 1, "gbp"),
+            (r'\u20ac\s*([0-9,]+(?:\.[0-9]{1,2})?)', 1, "eur"),
+            # Generic $ pattern
+            (r'>\$\s*([0-9,]+(?:\.[0-9]+)?)<', 1, "usd"),
+            (r'"priceWithoutCurrencySymbol"\s*:\s*"([0-9.]+)"', 1, ""),
+            (r'"amount"\s*:\s*"([0-9.]+)"', 1, ""),
+            (r'a-price-whole[^>]*>([0-9,]+)<', 1, ""),
+            (r'twitter:data1"\s+value="(?:[A-Z]{3}\s+)?([0-9,]+(?:\.[0-9]{1,2})?)"\s*/?', 1, ""),
+            # Generic $ (last resort)
+            (r'\$\s*([0-9,]+(?:\.[0-9]{1,2})?)', 1, "usd"),
+            (r'[Pp]rice[^<]{0,40}?([0-9,]+(?:\.[0-9]{1,2})?)', 1, ""),
+            (r'"(?:price|Price|amount)"\s*:\s*"(?:[A-Z]{3}\s+)?([0-9,]+(?:\.[0-9]{1,2})?)"', 1, ""),
+            (r'"(?:price|Price)"\s*:\s*([0-9.]+)', 1, ""),
         ]
-        for pat, group in _patterns:
+        for pat, group, hint in price_patterns:
             m = re.search(pat, html)
             if m:
                 try:
                     candidate = float(m.group(group).replace(",", ""))
-                    if 100 < candidate < 100_000_000:
+                    if 1.0 < candidate < 10_000_000_000:
                         price = candidate
+                        matched_currency = _currency_from_match(html, m, hint, domain)
                         break
                 except (ValueError, IndexError):
                     pass
 
     if not price:
+        p = _extract_price_from_rsc(html)
+        if p is not None:
+            price = p
+            matched_currency = _detect_currency(html)
+
+    if not price:
         return None
 
-    # Currency detection
-    currency = "NGN"
-    if "₦" not in html[:5000] and "NGN" not in html[:5000]:
-        if "$" in html[:5000]:
-            currency = "USD"
-        elif "€" in html[:5000]:
-            currency = "EUR"
-        elif "£" in html[:5000]:
-            currency = "GBP"
-
-    # Image: og:image
+    currency = matched_currency or _detect_currency(html)
     image = ""
     og_img = re.search(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', html)
     if og_img:
         image = og_img.group(1)
+    if image:
+        try:
+            import urllib.request
+            req = urllib.request.Request(image, method="HEAD")
+            with urllib.request.urlopen(req, timeout=2) as check:
+                if not check.status == 200 or not check.headers.get("Content-Type", "").startswith("image/"):
+                    image = ""
+        except Exception:
+            image = ""
+    if not image:
+        image = _extract_image_from_jsonld(html, url)
+    if not image:
+        image = _extract_image_from_embedded_json(html)
+    if not image:
+        image = _extract_image_from_html_attrs(html)
+    if not image:
+        image = _extract_image_from_other_meta(html)
+    if image and not image.startswith("http"):
+        image = urljoin(url, image)
 
     return {
         "domain": domain,
         "site_name": domain.split(".")[0].capitalize(),
-        "strategy_type": "api",
+        "strategy_type": "metadata",
         "api": {
             "endpoint": url,
             "method": "GET",
             "req_headers": {},
-            "field_mapping": {
-                k: ["jsonld", k]
-                for k in ("title", "price", "rating", "image_url")
-            },
-            "_jsonld_fields": {
+            "field_mapping": {k: ["jsonld", k] for k in ("title", "price", "rating", "image_url")},
+            "fields": {
                 "title": title,
                 "price": price,
                 "rating": "",
@@ -451,254 +1103,109 @@ async def _try_html_extraction(domain: str, url: str) -> dict | None:
     }
 
 
-def _drill_to_product(data):
-    """Walk JSON-LD to find a Product or mainEntity of type Product."""
-    if isinstance(data, dict):
-        if data.get("@type") == "Product":
-            return data
-        if data.get("mainEntity", {}).get("@type") == "Product":
-            return data["mainEntity"]
-        # @graph format: array of items inside @graph
-        graph = data.get("@graph")
-        if isinstance(graph, list):
-            for item in graph:
-                if isinstance(item, dict) and item.get("@type") == "Product":
-                    return item
-        for val in data.values():
-            result = _drill_to_product(val)
-            if result:
-                return result
-    elif isinstance(data, list):
-        for item in data:
-            result = _drill_to_product(item)
-            if result:
-                return result
-    return None
-
-
-# ── Phase 2b — API discovery ───────────────────────────────────────────
-
-def _discover_api_from_responses(domain: str, url: str,
-                                 responses: list) -> dict | None:
-    """Inspect captured network responses for product data APIs.
-
-    Follows forge skill's 'Fetch once, analyze many' rule.
-    """
-    candidates = []
-
-    for resp in responses:
-        body = resp.get("body", "")
-        if not _looks_like_product_json(body):
-            continue
-
-        mapping = _map_fields_from_json(body)
-        if not mapping or not mapping.get("title") or not mapping.get("price"):
-            continue
-
-        candidates.append({
-            "endpoint": resp["url"],
-            "method": resp["method"],
-            "req_headers": {
-                k: v for k, v in resp.get("request_headers", {}).items()
-                if k.lower() in (
-                    "accept", "content-type", "referer", "origin",
-                    "x-csrf-token", "authorization", "x-api-key",
-                    "x-requested-with",
-                )
-            },
-            "field_mapping": mapping,
-            "confidence": _score_mapping(mapping),
-        })
-
-    if not candidates:
-        return None
-
-    best = max(candidates, key=lambda c: c["confidence"])
-    return {
-        "domain": domain,
-        "site_name": domain.split(".")[0].capitalize(),
-        "strategy_type": "api",
-        "api": {
-            "endpoint": best["endpoint"],
-            "method": best["method"],
-            "req_headers": best["req_headers"],
-            "field_mapping": best["field_mapping"],
-        },
-        "sample_url": url,
-        "success_count": 0,
-        "failure_count": 0,
-    }
-
-
-def _looks_like_product_json(body: str) -> bool:
-    body = body.strip()
-    if not body.startswith(("{", "[")):
-        return False
+async def _fetch_page_httpx(url: str) -> str | None:
     try:
-        data = json.loads(body)
-    except json.JSONDecodeError:
-        return False
-    text = json.dumps(data).lower()
-    title_keys = ("title", "name", "product_name", "item_name", "heading")
-    price_keys = ("price", "sale_price", "regular_price", "current_price",
-                  "pricing", "amount", "cost")
-    return any(k in text for k in title_keys) and any(k in text for k in price_keys)
-
-
-def _map_fields_from_json(body: str) -> dict | None:
-    try:
-        data = json.loads(body)
-    except json.JSONDecodeError:
-        return None
-    if isinstance(data, list) and data:
-        data = data[0]
-
-    mapping = {}
-    for field, keys in (
-        ("title", ("title", "name", "product_name", "item_name", "heading")),
-        ("price", ("price", "sale_price", "regular_price", "current_price", "amount")),
-        ("rating", ("rating", "average_rating", "review_rating", "star_rating")),
-        ("image_url", ("image", "images", "image_url", "thumbnail", "picture", "img")),
-    ):
-        path = _find_in_json(data, keys)
-        if path:
-            mapping[field] = _path_to_list(path)
-
-    if "title" in mapping and "price" in mapping:
-        return mapping
-    return None
-
-
-def _find_in_json(obj, keys: tuple, path: tuple = ()) -> tuple | None:
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            kl = k.lower()
-            if any(key in kl or kl in key for key in keys):
-                if isinstance(v, (str, int, float)):
-                    return path + (k,)
-                if isinstance(v, dict):
-                    for ck in ("value", "amount", "raw", "display", "text", "current"):
-                        if ck in v:
-                            return path + (k, ck)
-                    fv = next((vk for vk in v.values()
-                               if isinstance(vk, (str, int, float))), None)
-                    if fv is not None:
-                        return path + (k, next(vk for vk, vv in v.items() if vv is fv))
-                    return path + (k,)
-            result = _find_in_json(v, keys, path + (k,))
-            if result:
-                return result
-    elif isinstance(obj, list):
-        for i, item in enumerate(obj):
-            result = _find_in_json(item, keys, path + (str(i),))
-            if result:
-                return result
-    return None
-
-
-def _path_to_list(path: tuple) -> list:
-    return list(path)
-
-
-def _score_mapping(mapping: dict) -> int:
-    score = 0
-    if mapping.get("title"):
-        score += 3
-    if mapping.get("price"):
-        score += 3
-    if mapping.get("rating"):
-        score += 1
-    if mapping.get("image_url"):
-        score += 1
-    return score
-
-
-# ── Phase 2c — DOM discovery (fallback) ────────────────────────────────
-
-async def _discover_dom(domain: str, url: str, page) -> dict | None:
-    """DOM-based fallback: probe CSS selectors and OG meta tags."""
-    probe_js = r"""
-(() => {
-    const candidates = {
-        title: [
-            "#productTitle", "h1", "[data-testid*='title']", "[data-testid*='product-title']",
-            ".product-title", ".ProductTitle", ".product-name", ".ProductName",
-            "[itemprop='name']", ".title", ".headline", ".product-header__title",
-            "h1 span", ".page-title", "[class*='product'] h1",
-            ".b-advert-title", ".qa-advert-title", "[class*='advert-title']"
-        ],
-        price: [
-            ".a-price .a-offscreen", "[data-testid*='price']", ".price", ".product-price",
-            ".ProductPrice", "[itemprop='price']", ".sale-price", ".regular-price",
-            ".price-value", "[class*='price']", ".a-price-whole",
-            "[data-automation='product-price']", ".price-current",
-            ".qa-advert-price-view-value", ".b-alt-advert-price__text", "[class*='advert-price']"
-        ],
-        rating: [
-            "#acrPopover", "[data-testid*='rating']", ".rating", ".star-rating",
-            "[itemprop='ratingValue']", ".rating-number", ".stars", "[class*='rating']",
-            ".product-rating", ".average-rating"
-        ],
-        image: [
-            "#landingImage", "[data-testid*='image'] img", ".product-image img",
-            ".ProductImage img", "[itemprop='image']", ".main-image img",
-            ".product-hero img", "[class*='gallery'] img", ".carousel img",
-            "img[src*='product']", ".product__image img",
-            ".b-slider-image", "[class*='slider-image']"
-        ]
-    };
-    const results = {};
-    for (const [field, selectors] of Object.entries(candidates)) {
-        for (const sel of selectors) {
-            try {
-                const el = document.querySelector(sel);
-                if (!el) continue;
-                const text = (el.textContent || el.innerText || "").trim();
-                const src = el.getAttribute("src") || el.getAttribute("data-src") || "";
-                const alt = el.getAttribute("alt") || "";
-                const href = el.getAttribute("href") || "";
-                results[field] = {
-                    selector: sel, text: text.slice(0, 300), src: src.slice(0, 500),
-                    alt: alt.slice(0, 100), href: href.slice(0, 500),
-                    tag: el.tagName.toLowerCase(),
-                    is_visible: !!(el.offsetParent || el.offsetWidth || el.offsetHeight)
-                };
-                break;
-            } catch(e) { continue; }
-        }
-        if (!results[field]) results[field] = { selector: null, text: "", src: "" };
-    }
-    results._html_title = document.title;
-    results._meta_desc = (document.querySelector("meta[name='description']") || {}).content || "";
-    results._og_image = (document.querySelector("meta[property='og:image']") || {}).content || "";
-    results._og_title = (document.querySelector("meta[property='og:title']") || {}).content || "";
-    results._og_price = (document.querySelector("meta[property='product:price:amount']") || {}).content || "";
-    return JSON.stringify(results);
-})();
-"""
-    try:
-        raw = await page.evaluate(probe_js)
+        import httpx
+        async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
+            resp = await client.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.5",
+            })
+            resp.raise_for_status()
+            return resp.text
     except Exception:
         return None
 
-    if not raw or not raw.startswith("{"):
-        return None
-    try:
-        probe = json.loads(raw)
-    except json.JSONDecodeError:
+
+async def _extract_metadata(domain: str, url: str) -> dict | None:
+    sources = []
+
+    resp = await _fetch_with_cache(url, domain=domain, timeout=15000)
+    if resp is not None and resp.status < 400:
+        html = _decode_response(resp)
+        if html and len(html) >= 500:
+            sources.append(html)
+
+    alt_html = await _fetch_page_httpx(url)
+    if alt_html and (not sources or alt_html != sources[0]):
+        sources.append(alt_html)
+
+    for html in sources:
+        result = _parse_metadata_from_html(domain, url, html)
+        if result:
+            return result
+    return None
+
+
+# ---------------------------------------------------------------------------
+# PROBE PHASE 3: DOM selector discovery
+# ---------------------------------------------------------------------------
+
+CANDIDATE_SELECTORS = {
+    "title": [
+        "[data-testid*='title']", "[data-testid*='product-title']",
+        ".product-title", ".ProductTitle", ".product-name", ".ProductName",
+        "[itemprop='name']", ".headline", ".product-header__title",
+        ".page-title", "[class*='product'] h1", "h1",
+        ".b-advert-title", ".qa-advert-title", "[class*='advert-title']",
+    ],
+    "price": [
+        "[data-testid*='price']", ".price", ".product-price",
+        ".ProductPrice", "[itemprop='price']", ".sale-price", ".regular-price",
+        ".price-value", "[class*='price']", ".price-current",
+        "[data-automation='product-price']",
+        ".qa-advert-price-view-value", ".b-alt-advert-price__text", "[class*='advert-price']",
+    ],
+    "rating": [
+        "[data-testid*='rating']", ".rating", ".star-rating",
+        "[itemprop='ratingValue']", ".rating-number", ".stars", "[class*='rating']",
+        ".product-rating", ".average-rating",
+    ],
+    "image": [
+        "[data-testid*='image'] img", ".product-image img",
+        ".ProductImage img", "[itemprop='image']", ".main-image img",
+        ".product-hero img", "[class*='gallery'] img", ".carousel img",
+        "img[src*='product']", ".product__image img",
+        ".b-slider-image", "[class*='slider-image']",
+    ],
+}
+
+
+async def _probe_dom_selectors(domain: str, url: str) -> dict | None:
+    resp = await _fetch_with_cache(url, domain=domain, timeout=30000)
+    if resp is None or resp.status >= 400:
         return None
 
     selectors = {}
-    for field in ("title", "price", "rating", "image"):
-        info = probe.get(field) or {}
-        sel = info.get("selector")
-        text = info.get("text", "")
-        src = info.get("src", "") or info.get("href", "")
-        selectors[field] = {"css": sel, "sample": (text or src or "")[:200]}
+    for field, css_list in CANDIDATE_SELECTORS.items():
+        found = None
+        sample = ""
+        for css in css_list:
+            els = resp.css(css)
+            el = _first_element(els)
+            if el:
+                found = css
+                if field == "image":
+                    val = el.attrib.get("src") or el.attrib.get("data-src") or ""
+                else:
+                    val = (el.text or "").strip()
+                sample = val[:200]
+                break
+        selectors[field] = {"css": found, "sample": sample}
 
-    og_title = probe.get("_og_title", "")
-    og_image = probe.get("_og_image", "")
-    og_price = probe.get("_og_price", "")
+    og_title = ""
+    og_el = _first_element(resp.css('meta[property="og:title"]'))
+    if og_el:
+        og_title = og_el.attrib.get("content", "")
+    og_image = ""
+    og_el = _first_element(resp.css('meta[property="og:image"]'))
+    if og_el:
+        og_image = og_el.attrib.get("content", "")
+    og_price = ""
+    og_el = _first_element(resp.css('meta[property="product:price:amount"]'))
+    if og_el:
+        og_price = og_el.attrib.get("content", "")
 
     if not selectors["title"]["css"] and og_title:
         selectors["title"] = {"css": None, "sample": og_title, "source": "og:title"}
@@ -710,16 +1217,21 @@ async def _discover_dom(domain: str, url: str, page) -> dict | None:
     if not any(v.get("css") or v.get("source") for v in selectors.values()):
         return None
 
+    page_title = ""
+    t_els = resp.css("title::text")
+    if t_els:
+        page_title = (t_els.extract_first() or "").strip()
+
     return {
         "domain": domain,
         "site_name": domain.split(".")[0].capitalize(),
         "strategy_type": "dom",
         "dom": {"selectors": selectors},
         "meta": {
-            "page_title": probe.get("_html_title", ""),
-            "og_title": og_title,
-            "og_image": og_image,
-            "og_price": og_price,
+            "page_title": page_title,
+            "og_title": og_title or "",
+            "og_image": og_image or "",
+            "og_price": og_price or "",
         },
         "sample_url": url,
         "success_count": 0,
@@ -727,9 +1239,43 @@ async def _discover_dom(domain: str, url: str, page) -> dict | None:
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# EXTRACTION
-# ═══════════════════════════════════════════════════════════════════════
+# ---------------------------------------------------------------------------
+# Strategy discovery pipeline
+# ---------------------------------------------------------------------------
+
+async def discover_extraction_strategy(url: str) -> dict | None:
+    domain = get_domain(url)
+
+    strategy = await _extract_jsonld(domain, url)
+    if strategy:
+        fields = strategy.get("api", {}).get("fields", {})
+        price = float(fields.get("price", 0))
+        if fields.get("title") and price > 1.0:
+            print(f"  [discover] JSON-LD strategy found for {domain}")
+            _update_timestamps(strategy)
+            return strategy
+
+    strategy = await _extract_metadata(domain, url)
+    if strategy:
+        fields = strategy.get("api", {}).get("fields", {})
+        price = float(fields.get("price", 0))
+        if fields.get("title") and price > 1.0:
+            print(f"  [discover] Metadata strategy found for {domain}")
+            _update_timestamps(strategy)
+            return strategy
+
+    print(f"  [discover] Probing DOM selectors for {domain}...")
+    strategy = await _probe_dom_selectors(domain, url)
+    if strategy and await _verify_extraction(url, strategy):
+        _update_timestamps(strategy)
+        return strategy
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Extraction helpers
+# ---------------------------------------------------------------------------
 
 def _get_field(data: dict | list, path: list):
     current = data
@@ -749,199 +1295,501 @@ def _get_field(data: dict | list, path: list):
     return current
 
 
+# ---------------------------------------------------------------------------
+# EXTRACTION via saved strategy (api/jsonld type)
+# ---------------------------------------------------------------------------
+
+async def _extract_using_jsonld_strategy(url: str, strategy: dict) -> dict | None:
+    domain = get_domain(url)
+    result = await _extract_jsonld(domain, url)
+    if result:
+        fields = result.get("api", {}).get("fields", {})
+        return {
+            "title": fields.get("title", ""),
+            "price": float(fields.get("price", 0)),
+            "rating": fields.get("rating", ""),
+            "image_url": fields.get("image_url", ""),
+            "currency": fields.get("currency", "NGN"),
+        }
+    result = await _extract_metadata(domain, url)
+    if result:
+        fields = result.get("api", {}).get("fields", {})
+        return {
+            "title": fields.get("title", ""),
+            "price": float(fields.get("price", 0)),
+            "rating": fields.get("rating", ""),
+            "image_url": fields.get("image_url", ""),
+            "currency": fields.get("currency", "NGN"),
+        }
+    return None
+
+
+async def _extract_using_metadata_strategy(url: str, strategy: dict) -> dict | None:
+    domain = get_domain(url)
+    result = await _extract_metadata(domain, url)
+    if result:
+        fields = result.get("api", {}).get("fields", {})
+        return {
+            "title": fields.get("title", ""),
+            "price": float(fields.get("price", 0)),
+            "rating": fields.get("rating", ""),
+            "image_url": fields.get("image_url", ""),
+            "currency": fields.get("currency", "NGN"),
+        }
+    return None
+
+
+async def _extract_using_api_strategy(url: str, strategy: dict) -> dict | None:
+    domain = get_domain(url)
+    result = await _extract_jsonld(domain, url)
+    if result:
+        fields = result.get("api", {}).get("fields", {})
+        return {
+            "title": fields.get("title", ""),
+            "price": float(fields.get("price", 0)),
+            "rating": fields.get("rating", ""),
+            "image_url": fields.get("image_url", ""),
+            "currency": fields.get("currency", "NGN"),
+        }
+    result = await _extract_metadata(domain, url)
+    if result:
+        fields = result.get("api", {}).get("fields", {})
+        return {
+            "title": fields.get("title", ""),
+            "price": float(fields.get("price", 0)),
+            "rating": fields.get("rating", ""),
+            "image_url": fields.get("image_url", ""),
+            "currency": fields.get("currency", "NGN"),
+        }
+    return None
+
+
+# ---------------------------------------------------------------------------
+# EXTRACTION via saved DOM strategy
+# ---------------------------------------------------------------------------
+
+async def _extract_using_dom_strategy(url: str, strategy: dict) -> dict | None:
+    selectors = strategy.get("dom", {}).get("selectors", {})
+    resp = await _fetch_with_cache(url, domain=get_domain(url), timeout=30000)
+    if resp is None or resp.status >= 400:
+        return None
+    html = _decode_response(resp)
+
+    title = ""
+    sel = selectors.get("title", {}).get("css")
+    if sel:
+        els = resp.css(sel)
+        el = _first_element(els)
+        if el:
+            title = (el.text or "").strip()
+    if not title:
+        og_el = _first_element(resp.css('meta[property="og:title"]'))
+        if og_el:
+            title = og_el.attrib.get("content", "")
+
+    price = 0.0
+    sel = selectors.get("price", {}).get("css")
+    if sel:
+        els = resp.css(sel)
+        el = _first_element(els)
+        if el:
+            pt = (el.text or "").strip()
+            parsed = _parse_price_from_text(pt)
+            if parsed:
+                price = parsed
+    if not price:
+        og_el = _first_element(resp.css('meta[property="product:price:amount"]'))
+        if og_el:
+            try:
+                price = float(og_el.attrib.get("content", "").replace(",", ""))
+            except ValueError:
+                pass
+    if not price:
+        matched = resp.find_by_regex(r"[\u20a6$]\s*([0-9,]+(?:\.[0-9]{1,2})?)")
+        if matched and matched.get():
+            try:
+                price = float(matched.re_first(r"[\u20a6$]\s*([0-9,]+(?:\.[0-9]{1,2})?)").replace(",", ""))
+            except (ValueError, AttributeError):
+                pass
+
+    rating = ""
+    sel = selectors.get("rating", {}).get("css")
+    if sel:
+        els = resp.css(sel)
+        el = _first_element(els)
+        if el:
+            rt = (el.text or "").strip()
+            rm = re.search(r"([\d.]+)\s*out\s*of\s*5", rt)
+            if rm:
+                rating = rm.group(1)
+            elif rt:
+                rating = rt[:20]
+
+    image = ""
+    sel = selectors.get("image", {}).get("css")
+    if sel:
+        els = resp.css(sel)
+        el = _first_element(els)
+        if el:
+            image = el.attrib.get("src") or el.attrib.get("data-src") or ""
+    if not image:
+        og_el = _first_element(resp.css('meta[property="og:image"]'))
+        if og_el:
+            image = og_el.attrib.get("content", "")
+    if image and not image.startswith("http"):
+        image = urljoin(url, image)
+
+    currency = _detect_currency(html)
+
+    return {
+        "title": title or "",
+        "price": price,
+        "rating": rating or "",
+        "image_url": image or "",
+        "currency": currency,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Strategy dispatcher
+# ---------------------------------------------------------------------------
+
 async def extract_with_strategy(url: str, strategy: dict) -> dict | None:
     strategy_type = strategy.get("strategy_type", "dom")
+    if strategy_type == "jsonld":
+        return await _extract_using_jsonld_strategy(url, strategy)
+    if strategy_type == "metadata":
+        return await _extract_using_metadata_strategy(url, strategy)
     if strategy_type == "api":
-        return await _extract_via_api(url, strategy)
-    return await _extract_via_dom(url, strategy)
+        return await _extract_using_api_strategy(url, strategy)
+    return await _extract_using_dom_strategy(url, strategy)
 
 
-async def _extract_via_api(url: str, strategy: dict) -> dict | None:
-    api = strategy.get("api", {})
-    endpoint = api.get("endpoint", "")
-    method = api.get("method", "GET").upper()
-    headers = api.get("req_headers", {})
-    mapping = api.get("field_mapping", {})
+# ---------------------------------------------------------------------------
+# Last-chance extraction (no strategy found)
+# ---------------------------------------------------------------------------
 
-    # JSON-LD strategy: always extract from the actual URL (domain-wide, not URL-locked)
-    jsonld_fields = api.get("_jsonld_fields")
-    if jsonld_fields is not None:
-        domain = get_domain(url)
-        result = await _try_jsonld_from_http(domain, url)
-        if result:
-            fields = result.get("api", {}).get("_jsonld_fields", {})
-            return {
-                "title": fields.get("title", ""),
-                "price": float(fields.get("price", 0)),
-                "rating": fields.get("rating", ""),
-                "image_url": fields.get("image_url", ""),
-                "currency": fields.get("currency", "NGN"),
-            }
-        # HTML extraction fallback — catches Cloudflare-protected sites
-        # where the browser is unavailable but httpx can fetch HTML.
-        result = await _try_html_extraction(domain, url)
-        if result:
-            fields = result.get("api", {}).get("_jsonld_fields", {})
-            return {
-                "title": fields.get("title", ""),
-                "price": float(fields.get("price", 0)),
-                "rating": fields.get("rating", ""),
-                "image_url": fields.get("image_url", ""),
-                "currency": fields.get("currency", "NGN"),
-            }
-        return None
+async def _fallback_extract(url: str) -> dict | None:
+    """Inline JSON-LD then metadata extraction, used when no strategy is available."""
+    domain = get_domain(url)
 
-    try:
-        kwargs = {"proxy": PROXY_URL} if PROXY_URL else {}
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30, **kwargs) as client:
-            if method == "GET":
-                resp = await client.get(endpoint, headers=headers)
-            elif method == "POST":
-                resp = await client.post(endpoint, headers=headers)
-            else:
-                return None
-            resp.raise_for_status()
-            data = resp.json()
-    except Exception:
-        return None
+    result = await _extract_jsonld(domain, url)
+    if result:
+        fields = result.get("api", {}).get("fields", {})
+        return {
+            "title": fields.get("title", ""),
+            "price": float(fields.get("price", 0)),
+            "rating": fields.get("rating", ""),
+            "image_url": fields.get("image_url", ""),
+            "currency": fields.get("currency", "NGN"),
+        }
 
-    result = {}
-    for field, path in mapping.items():
-        val = _get_field(data, path)
-        result[field] = str(val).strip() if val is not None else ""
+    result = await _extract_metadata(domain, url)
+    if result:
+        fields = result.get("api", {}).get("fields", {})
+        flat = {
+            "title": fields.get("title", ""),
+            "price": float(fields.get("price", 0)),
+            "rating": fields.get("rating", ""),
+            "image_url": fields.get("image_url", ""),
+            "currency": fields.get("currency", "NGN"),
+        }
+        if _acceptable_data(flat):
+            return flat
 
-    price_val = 0.0
-    try:
-        cleaned = re.sub(r"[^\d.,]", "", result.get("price", "0").replace(",", "."))
-        cleaned = cleaned.replace(".", "", cleaned.count(".") - 1) if cleaned.count(".") > 1 else cleaned
-        price_val = float(cleaned) if cleaned else 0.0
-    except (ValueError, TypeError):
-        pass
-
-    return {
-        "title": result.get("title", ""),
-        "price": price_val,
-        "rating": result.get("rating", ""),
-        "image_url": result.get("image_url", ""),
-        "currency": "NGN",
-    }
+    return None
 
 
-async def _extract_via_dom(url: str, strategy: dict) -> dict | None:
-    browser = await _get_browser()
-    page = await browser.new_page()
+# ---------------------------------------------------------------------------
+# Data quality gate
+# ---------------------------------------------------------------------------
 
-    selectors = strategy.get("dom", {}).get("selectors", {})
-    js = _build_dom_extract_js(selectors)
-
-    try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        await page.wait_for_timeout(2000)
-        raw = await page.evaluate(js)
-    except Exception:
-        return None
-    finally:
-        await page.close()
-
-    if not raw or not raw.startswith("{"):
-        return None
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
-
-    price_val = 0.0
-    try:
-        price_str = (result.get("price") or "0").replace(",", "")
-        price_val = float(price_str) if price_str else 0.0
-    except (ValueError, TypeError):
-        pass
-
-    return {
-        "title": (result.get("title") or "").strip(),
-        "price": price_val,
-        "rating": (result.get("rating") or "").strip(),
-        "image_url": (result.get("image_url") or "").strip(),
-        "currency": result.get("currency") or "NGN",
-    }
+def _acceptable_data(data) -> bool:
+    if not data or not data.get("title") or data.get("price", 0) <= 1.0:
+        return False
+    title_lower = data["title"].lower()
+    if any(w in title_lower for w in ("not found", "whoops", "error", "404", "homepage")):
+        return False
+    return True
 
 
-def _build_dom_extract_js(selectors: dict) -> str:
-    parts = []
-    var_map = {
-        "title": ("$t", "title", False),
-        "price": ("$p", "priceText", False),
-        "rating": ("$r", "ratingText", False),
-        "image": ("$i", "imageSrc", True),
-    }
-    for field, (sv, rv, is_attr) in var_map.items():
-        info = selectors.get(field, {})
-        css = info.get("css") or (info if isinstance(info, str) else "")
-        if css:
-            safe_css = css.replace("'", "\\'")
-            parts.append(f"const {sv} = document.querySelector('{safe_css}')")
-            if is_attr:
-                parts.append(
-                    f"""{rv} = ({sv} ? ({sv}.getAttribute('src')||{sv}.getAttribute('data-src')||{sv}.getAttribute('content')||'') : '')""")
-            else:
-                parts.append(
-                    f"{rv} = ({sv} ? ({sv}.textContent||{sv}.innerText||'').trim() : '')")
-        else:
-            parts.append(f"{rv} = ''")
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
 
-    js = ";\n".join(parts) + ";\n" + """
-var match1 = priceText.match(/\\u20A6\\s*([0-9,]+)/);
-var match2 = priceText.match(/\\$\\s*([0-9,]+)/);
-var match3 = priceText.match(/([0-9,]+)\\s*\\u20A6/);
-var match4 = priceText.match(/([0-9,]+)\\s*\\$/);
-var priceMatch = match1 || match2 || match3 || match4;
-var currencyCode = match1 || match3 ? 'NGN' : (priceMatch ? 'USD' : '');
-var ratingMatch = ratingText.match(/([\\d.]+)\\s*out\\s*of\\s*5/i);
-var ogPrice = (document.querySelector("meta[property='product:price:amount']") || {}).content || "";
-var ogImage = (document.querySelector("meta[property='og:image']") || {}).content || "";
-var ogTitle = (document.querySelector("meta[property='og:title']") || {}).content || "";
-if (!title && ogTitle) title = ogTitle;
-if (!imageSrc && ogImage) imageSrc = ogImage;
-if (!priceMatch && ogPrice) { priceText = ogPrice; match1 = ogPrice.match(/\\u20A6\\s*([0-9,]+)/); match2 = ogPrice.match(/\\$\\s*([0-9,]+)/); match3 = ogPrice.match(/([0-9,]+)\\s*\\u20A6/); match4 = ogPrice.match(/([0-9,]+)\\s*\\$/); priceMatch = match1 || match2 || match3 || match4; currencyCode = match1 || match3 ? 'NGN' : (priceMatch ? 'USD' : ''); }
-var priceStr = priceMatch ? priceMatch[1].replace(/,/g, "") : "0";
-JSON.stringify({
-    title: title || "",
-    price: priceStr,
-    rating: ratingMatch ? ratingMatch[1] : "",
-    image_url: (imageSrc || "").startsWith("http") ? imageSrc : (imageSrc ? new URL(imageSrc, document.baseURI).href : ""),
-    currency: currencyCode
-});
-"""
-    return js
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# SINGLE-URL SCRAPE (shared by views, scrape command, and scheduler)
-# ═══════════════════════════════════════════════════════════════════════
-
-async def scrape_url(url: str) -> dict | None:
-    """Scrape a single product URL end-to-end.
-    
-    Loads cached strategy or forges a new one, extracts data.
-    Returns dict with keys: title, price, rating, image_url, currency
-    or None if all attempts failed.
-    """
+async def _scrape_http(url: str) -> dict | None:
+    """HTTP extraction via strategy, discovery, or fallback.
+    Proxy on/off is controlled by the caller via _disable_proxy."""
     domain = get_domain(url)
     strategy = load_strategy(domain)
+    proxy_on = not _disable_proxy
 
     if strategy and not needs_rediscovery(strategy):
         data = await extract_with_strategy(url, strategy)
-        if data and data.get("title") and data.get("price", 0) > 0:
-            mark_success(strategy)
+        if _acceptable_data(data):
+            mark_success(strategy, proxy_on=proxy_on, transport="http")
             return data
         mark_failure(strategy)
 
-    strategy = await forge_strategy(url)
-    if not strategy:
-        # Phase 5 — Direct HTML extraction (Cloudflare-safe fallback, no strategy persisted)
-        data = await _try_html_extraction(domain, url)
-        if data:
-            fields = data.get("api", {}).get("_jsonld_fields", {})
+    strategy = await discover_extraction_strategy(url)
+    if strategy:
+        data = await extract_with_strategy(url, strategy)
+        if _acceptable_data(data):
+            mark_success(strategy, proxy_on=proxy_on, transport="http")
+            return data
+        mark_failure(strategy)
+
+    data = await _fallback_extract(url)
+    if data:
+        return data
+
+    return None
+
+
+def _classify_extraction_failure(resp) -> str:
+    if resp is None:
+        return "network_error"
+    if resp.status in (404, 410):
+        return "not_found"
+    if resp.status >= 500:
+        return "server_error"
+    if resp.status == 403:
+        html = _decode_response(resp).lower()
+        if (
+            "cf-browser-verification" in html
+            or "__cf_chl_opt" in html
+            or "challenge-form" in html
+            or "just a moment" in html
+        ):
+            return "cloudflare"
+        return "blocked"
+    html = _decode_response(resp).lower()
+    if "captcha" in html:
+        return "bot_blocked"
+    if html_is_unavailable(html):
+        return "unavailable"
+    return "no_data_parsed"
+
+
+_GONE_PATTERNS = [
+    # General "not found" / "removed"
+    "product not found",
+    "page not found",
+    "this page is no longer active",
+    "page you are looking for",
+    "this page doesn't exist",
+    "we couldn't find this page",
+    "this page could not be found",
+    "couldn't find the page",
+    "could not find the page",
+    "we can't find the page",
+    "can't find the page",
+    "cannot find the page",
+    "doesn't exist",
+    "does not exist",
+    # User-facing "oops" / "sorry"
+    "oops",
+    "sorry, we couldn't find",
+    "sorry, this listing",
+    "sorry! we can't find",
+    "we are sorry",
+    "something went wrong",
+    # Sold out / ended
+    "sold out",
+    "this listing has ended",
+    "this listing ended",
+    "listing ended",
+    "this item is no longer available",
+    "item is no longer available",
+    "no longer available",
+    "this product is no longer",
+    "product is no longer",
+    "currently unavailable",
+    # Removed / taken down
+    "product unavailable",
+    "item unavailable",
+    "listing unavailable",
+    "this item was removed",
+    "item has been removed",
+    "has been removed",
+    "has been deleted",
+    "listing was removed",
+    "advert has been removed",
+    "this advert is no longer",
+    "advert is no longer",
+    # SPA indicators (next.js, nuxt, create-react-app)
+    "page-not-found",
+    "pagenotfound",
+    '"statusCode":404',
+    '"status_code":404',
+    '"status":404',
+    '"statusCode":410',
+    'httpErrorCode":404',
+    '"notFound":true',
+    '"not_found":true',
+    # Search / empty results
+    "no results found",
+    "no products found",
+    "0 results",
+    "we couldn't find any",
+    "couldn't find any",
+    "no matching products",
+]
+
+
+def _title_is_gone(title: str) -> bool:
+    lowered = title.lower()
+    gone_title_patterns = [
+        "page not found",
+        "not found",
+        "404",
+        "410",
+        "product not found",
+        "page not available",
+        "page unavailable",
+        "oops",
+        "listing not found",
+        "advert not found",
+    ]
+    for pattern in gone_title_patterns:
+        if pattern in lowered:
+            return True
+    return False
+
+
+def html_is_unavailable(html: str) -> bool:
+    lowered = html.lower()
+    for pattern in _GONE_PATTERNS:
+        if pattern in lowered:
+            return True
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", lowered, re.DOTALL)
+    if title_match and _title_is_gone(title_match.group(1)):
+        return True
+    meta_match = re.search(r'<meta[^>]+name="robots"[^>]+content="([^"]*)"', lowered)
+    if meta_match and "noindex" in meta_match.group(1).lower():
+        return True
+    return False
+
+
+async def _fetch_and_classify(url: str) -> str:
+    resp = await _fetch_with_cache(url, domain=get_domain(url), timeout=8000)
+    return _classify_extraction_failure(resp)
+
+
+def _merge_enrich(base: dict, overlay: dict) -> dict:
+    """Fill missing fields in base from overlay without overwriting existing values."""
+    result = dict(base)
+    for key in ("image_url", "rating"):
+        if not result.get(key) and overlay.get(key):
+            result[key] = overlay[key]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Jumia fast path — single fetch, direct extraction, no retry onion
+# ---------------------------------------------------------------------------
+
+async def _scrape_jumia(url: str) -> dict | None:
+    """Dedicated Jumia extraction: one fetch, lower timeout, JSON-LD + metadata fallback."""
+    from scrapling.fetchers import AsyncFetcher
+
+    proxy = _get_proxy_for_domain(get_domain(url))
+    for attempt in range(2):
+        try:
+            resp = await AsyncFetcher.get(url, proxy=proxy, timeout=15000)
+            break
+        except Exception:
+            if attempt == 0:
+                continue
+            return None
+
+    if resp is None or resp.status >= 400:
+        return None
+
+    html = _decode_response(resp)
+    if not html:
+        return None
+
+    domain = get_domain(url)
+
+    # Fast JSON-LD extraction (inline, no separate fetch)
+    ld_pat = r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>'
+    for m in re.finditer(ld_pat, html, re.DOTALL):
+        try:
+            ld = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            continue
+        product = _find_product_in_jsonld(ld)
+        if not product:
+            continue
+
+        name = product.get("name", "")
+        offers = product.get("offers", {})
+
+        def _best_offer_price(offer):
+            if not isinstance(offer, dict):
+                return None, "NGN"
+            ot = offer.get("@type", "")
+            if ot == "AggregateOffer":
+                low = offer.get("lowPrice") or offer.get("lowprice")
+                if low:
+                    return low, offer.get("priceCurrency", "NGN")
+                return None, "NGN"
+            p = offer.get("price")
+            c = offer.get("priceCurrency", "NGN")
+            spec = offer.get("priceSpecification")
+            if p and isinstance(spec, dict) and (spec.get("priceType") == "SalePrice" or spec.get("@type") == "UnitPriceSpecification"):
+                return spec.get("price"), spec.get("priceCurrency") or c
+            return p, c
+
+        if isinstance(offers, list):
+            best_price, best_cur = None, "NGN"
+            for offer in offers:
+                p, cur = _best_offer_price(offer)
+                if p is not None:
+                    try:
+                        pv = float(p.replace(",", "")) if isinstance(p, str) else float(p)
+                    except (ValueError, TypeError):
+                        continue
+                    if best_price is None or pv < best_price:
+                        best_price = pv
+                        best_cur = cur
+            if best_price is None:
+                continue
+            price = best_price
+            currency = best_cur
+        else:
+            price_raw, currency = _best_offer_price(offers)
+            if price_raw is None:
+                continue
+            price = float(price_raw.replace(",", "")) if isinstance(price_raw, str) else float(price_raw)
+
+        if not name:
+            continue
+
+        image = product.get("image", "")
+        if isinstance(image, dict):
+            image = image.get("contentUrl") or image.get("url") or ""
+        if isinstance(image, list):
+            image = image[0] if image else ""
+        if isinstance(image, str) and image:
+            if not urlparse(image).netloc:
+                image = urljoin(url, image)
+
+        rating_obj = product.get("aggregateRating", {})
+        if isinstance(rating_obj, list):
+            rating_obj = rating_obj[0] if rating_obj else {}
+        rating = rating_obj.get("ratingValue", "")
+
+        result = {"title": name, "price": price, "currency": currency, "image_url": image, "rating": rating}
+        if result.get("title") and result.get("price", 0) > 0:
+            return result
+
+    # Fallback: metadata extraction on same HTML
+    meta = _parse_metadata_from_html(domain, url, html)
+    if meta:
+        fields = meta.get("api", {}).get("fields", {})
+        if fields.get("title") and fields.get("price", 0) > 1.0:
             return {
                 "title": fields.get("title", ""),
                 "price": float(fields.get("price", 0)),
@@ -949,16 +1797,253 @@ async def scrape_url(url: str) -> dict | None:
                 "image_url": fields.get("image_url", ""),
                 "currency": fields.get("currency", "NGN"),
             }
+
+    return None
+
+
+async def _scrape_jiji(url: str) -> dict | None:
+    """Dedicated Jiji extraction: one fetch, lower timeout, JSON-LD + metadata fallback."""
+    from scrapling.fetchers import AsyncFetcher
+
+    proxy = _get_proxy_for_domain(get_domain(url))
+    for attempt in range(2):
+        try:
+            resp = await AsyncFetcher.get(url, proxy=proxy, timeout=15000)
+            break
+        except Exception:
+            if attempt == 0:
+                continue
+            return None
+
+    if resp is None or resp.status >= 400:
         return None
-    mark_success(strategy)
-    return await extract_with_strategy(url, strategy)
+
+    html = _decode_response(resp)
+    if not html:
+        return None
+
+    domain = get_domain(url)
+
+    ld_pat = r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>'
+    for m in re.finditer(ld_pat, html, re.DOTALL):
+        try:
+            ld = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            continue
+        product = _find_product_in_jsonld(ld)
+        if not product:
+            continue
+
+        name = product.get("name", "")
+        offers = product.get("offers", {})
+
+        def _best_offer_price(offer):
+            if not isinstance(offer, dict):
+                return None, "NGN"
+            ot = offer.get("@type", "")
+            if ot == "AggregateOffer":
+                low = offer.get("lowPrice") or offer.get("lowprice")
+                if low:
+                    return low, offer.get("priceCurrency", "NGN")
+                return None, "NGN"
+            p = offer.get("price")
+            c = offer.get("priceCurrency", "NGN")
+            spec = offer.get("priceSpecification")
+            if p and isinstance(spec, dict) and (spec.get("priceType") == "SalePrice" or spec.get("@type") == "UnitPriceSpecification"):
+                return spec.get("price"), spec.get("priceCurrency") or c
+            return p, c
+
+        if isinstance(offers, list):
+            best_price, best_cur = None, "NGN"
+            for offer in offers:
+                p, cur = _best_offer_price(offer)
+                if p is not None:
+                    try:
+                        pv = float(p.replace(",", "")) if isinstance(p, str) else float(p)
+                    except (ValueError, TypeError):
+                        continue
+                    if best_price is None or pv < best_price:
+                        best_price = pv
+                        best_cur = cur
+            if best_price is None:
+                continue
+            price = best_price
+            currency = best_cur
+        else:
+            price_raw, currency = _best_offer_price(offers)
+            if price_raw is None:
+                continue
+            price = float(price_raw.replace(",", "")) if isinstance(price_raw, str) else float(price_raw)
+
+        if not name:
+            continue
+
+        image = product.get("image", "")
+        if isinstance(image, dict):
+            image = image.get("contentUrl") or image.get("url") or ""
+        if isinstance(image, list):
+            image = image[0] if image else ""
+        if isinstance(image, str) and image:
+            if not urlparse(image).netloc:
+                image = urljoin(url, image)
+        image = product.get("image", "")
+        if isinstance(image, dict):
+            image = image.get("contentUrl") or image.get("url") or ""
+        if isinstance(image, list):
+            image = image[0] if image else ""
+        if isinstance(image, str) and image:
+            if not urlparse(image).netloc:
+                image = urljoin(url, image)
+
+        rating_obj = product.get("aggregateRating", {})
+        if isinstance(rating_obj, list):
+            rating_obj = rating_obj[0] if rating_obj else {}
+        rating = rating_obj.get("ratingValue", "")
+
+        result = {"title": name, "price": price, "currency": currency, "image_url": image, "rating": rating}
+        if result.get("title") and result.get("price", 0) > 0:
+            return result
+
+    meta = _parse_metadata_from_html(domain, url, html)
+    if meta:
+        fields = meta.get("api", {}).get("fields", {})
+        if fields.get("title") and fields.get("price", 0) > 1.0:
+            return {
+                "title": fields.get("title", ""),
+                "price": float(fields.get("price", 0)),
+                "rating": fields.get("rating", ""),
+                "image_url": fields.get("image_url", ""),
+                "currency": fields.get("currency", "NGN"),
+            }
+
+    return None
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# VERIFICATION (Phase 3 — Delivery step)
-# ═══════════════════════════════════════════════════════════════════════
+async def _try_phase(url: str, proxy_on: bool, transport: str, accumulated: dict | None) -> dict | None:
+    """Execute a single scrape phase. Returns data or None."""
+    global _disable_proxy
+    domain = get_domain(url)
+    d0 = _disable_proxy
+    _disable_proxy = not proxy_on
+    try:
+        if transport == "http":
+            result = await _scrape_http(url)
+            if result:
+                result = _merge_enrich(result, accumulated or {})
+                return result
+            return None
 
-async def _verify_strategy(url: str, strategy: dict) -> bool:
+        # transport == "browser"
+        result = await _try_stealth_fetch(url, domain)
+        if result:
+            result = _merge_enrich(result, accumulated or {})
+            if result.get("title") and result.get("price", 0) > 0:
+                strat = load_strategy(domain)
+                if strat:
+                    mark_success(strat, proxy_on=proxy_on, transport="browser")
+                return result
+        return None
+    finally:
+        _disable_proxy = d0
+
+
+def _build_phase_order(strategy: dict | None) -> list[dict]:
+    """Return scrape phases ordered by last success, then default as fallback."""
+    phases = [
+        {"proxy_on": False, "transport": "http", "label": "http-no-proxy"},
+        {"proxy_on": True, "transport": "http", "label": "http-with-proxy"},
+        {"proxy_on": False, "transport": "browser", "label": "browser-no-proxy"},
+        {"proxy_on": True, "transport": "browser", "label": "browser-with-proxy"},
+    ]
+    last = (strategy or {}).get("last_success", {})
+    if last:
+        preferred = {"proxy_on": last.get("proxy_on", False), "transport": last.get("transport", "http")}
+        for i, p in enumerate(phases):
+            if p["proxy_on"] == preferred["proxy_on"] and p["transport"] == preferred["transport"]:
+                phases.insert(0, phases.pop(i))
+                break
+    return phases
+
+
+async def scrape_url(url: str) -> dict | None:
+    global _disable_proxy
+
+    # Rewrite eBay desktop URLs to mobile (bypasses bot challenge)
+    parsed = urlparse(url)
+    if parsed.netloc in ("www.ebay.com", "ebay.com", "ebay.co.uk", "www.ebay.co.uk"):
+        url = urlunparse(parsed._replace(netloc="m." + parsed.netloc.removeprefix("www.")))
+
+    d0 = _disable_proxy
+    domain = get_domain(url)
+
+    # Jiji and Jumia work best with proxy — dedicated fast path, single fetch + direct extraction
+    if _get_proxy_for_domain(domain) and ("jiji" in parsed.netloc or "jumia" in parsed.netloc):
+        _disable_proxy = False
+        try:
+            if "jiji" in parsed.netloc:
+                data = await _scrape_jiji(url)
+            else:
+                data = await _scrape_jumia(url)
+        finally:
+            _disable_proxy = d0
+        if data:
+            data["_proxy"] = True
+            data["_strategy"] = f"{'jiji' if 'jiji' in parsed.netloc else 'jumia'}-via-proxy"
+            strat = load_strategy(domain)
+            if strat:
+                mark_success(strat, proxy_on=True, transport="http")
+            return data
+        return None
+
+    strategy = load_strategy(domain)
+    phase_order = _build_phase_order(strategy)
+
+    has_proxy = bool(_get_proxy_for_domain(domain))
+    accumulated = None
+    cls = None
+
+    for phase in phase_order:
+        p_on = phase["proxy_on"]
+        t = phase["transport"]
+
+        # Skip proxy phases when no proxy is configured
+        if p_on and not has_proxy:
+            continue
+
+        # Skip browser phases for bot-blocked sites
+        if t == "browser" and cls == "bot_blocked":
+            continue
+
+        # Classify failure before browser phases
+        if t == "browser" and cls is None and accumulated is None:
+            cls = await _fetch_and_classify(url)
+            if cls == "not_found":
+                if accumulated:
+                    accumulated["_proxy"] = False
+                    accumulated["_strategy"] = "partial-http-no-proxy"
+                return accumulated if accumulated else None
+
+        result = await _try_phase(url, p_on, t, accumulated)
+        if result:
+            result["_proxy"] = p_on
+            result["_strategy"] = phase["label"]
+            # HTTP results need image_url to be considered complete
+            if t == "http" and not result.get("image_url"):
+                accumulated = result if accumulated is None else _merge_enrich(result, accumulated)
+                continue
+            return result
+
+    if accumulated:
+        accumulated["_proxy"] = False
+        accumulated["_strategy"] = "partial-http-no-proxy"
+    return accumulated
+
+
+# ---------------------------------------------------------------------------
+# Strategy verification (used internally after DOM probe)
+# ---------------------------------------------------------------------------
+
+async def _verify_extraction(url: str, strategy: dict) -> bool:
     data = await extract_with_strategy(url, strategy)
     if data is None:
         return False

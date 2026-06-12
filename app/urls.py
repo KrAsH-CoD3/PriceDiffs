@@ -15,4 +15,6 @@ urlpatterns = [
     path("api/products", views.products_view, name="list_products"),
     path("api/products/<int:product_id>", views.product_detail_view, name="product_detail"),
     path("api/snapshots", views.create_snapshot, name="create_snapshot"),
+    path("api/events/poll", views.poll_events, name="poll_events"),
+    path("api/events/max-id", views.scrape_events_max_id, name="scrape_events_max_id"),
 ]

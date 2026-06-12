@@ -1,7 +1,7 @@
 {
   "domain": "kusnap.com",
   "site_name": "Kusnap",
-  "strategy_type": "api",
+  "strategy_type": "metadata",
   "api": {
     "endpoint": "https://kusnap.com/product/7061005-starlink-internet",
     "method": "GET",
@@ -24,17 +24,17 @@
         "image_url"
       ]
     },
-    "_jsonld_fields": {
+    "fields": {
       "title": "Starlink Internet | Free Online Marketplace to Buy & Sell in Nigeria",
-      "price": 396000.0,
+      "price": 440000.0,
       "rating": "",
       "image_url": "",
       "currency": "NGN"
     }
   },
   "sample_url": "https://kusnap.com/product/7061005-starlink-internet",
-  "success_count": 1,
+  "success_count": 19,
   "failure_count": 0,
-  "created_at": "2026-06-03T01:50:40.795109+00:00",
-  "updated_at": "2026-06-03T01:50:40.795398+00:00"
+  "created_at": "2026-06-10T03:47:08.207703+00:00",
+  "updated_at": "2026-06-10T22:09:48.621802+00:00"
 }

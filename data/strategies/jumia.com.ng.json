@@ -1,13 +1,11 @@
 {
   "domain": "jumia.com.ng",
-  "site_name": "Jumia Ng",
-  "strategy_type": "api",
+  "site_name": "Jumia",
+  "strategy_type": "jsonld",
   "api": {
-    "endpoint": "https://www.jumia.com.ng",
+    "endpoint": "https://www.jumia.com.ng/airforce-1-sneakers-fashion-mpg11957645.html",
     "method": "GET",
-    "req_headers": {
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    },
+    "req_headers": {},
     "field_mapping": {
       "title": [
         "jsonld",
@@ -26,17 +24,21 @@
         "image_url"
       ]
     },
-    "_jsonld_fields": {
-      "title": "Redmi G34WQ 2026 Curved Gaming Monitors",
-      "price": 595000.0,
-      "rating": "",
-      "image_url": "",
+    "fields": {
+      "title": "AIRFORCE 1 SNEAKERS ",
+      "price": 48000.0,
+      "rating": "5",
+      "image_url": "https://ng.jumia.is/unsafe/fit-in/680x680/filters:fill(white)/product/07/0552914/1.jpg?6846",
       "currency": "NGN"
     }
   },
-  "sample_url": "https://www.jumia.com.ng/xiaomi-redmi-g34wq-2026-curved-gaming-monitors-419014126.html",
-  "success_count": 2,
-  "failure_count": 1,
-  "created_at": "2026-05-30T02:01:25.360156+00:00",
-  "updated_at": "2026-05-30T17:02:23.100371+00:00"
+  "sample_url": "https://www.jumia.com.ng/airforce-1-sneakers-fashion-mpg11957645.html",
+  "success_count": 28,
+  "failure_count": 0,
+  "created_at": "2026-06-10T21:19:39.919567+00:00",
+  "updated_at": "2026-06-11T03:50:10.830364+00:00",
+  "last_success": {
+    "proxy_on": true,
+    "transport": "http"
+  }
 }

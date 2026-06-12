@@ -1,0 +1,44 @@
+{
+  "domain": "books.toscrape.com",
+  "site_name": "Books",
+  "strategy_type": "metadata",
+  "api": {
+    "endpoint": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+    "method": "GET",
+    "req_headers": {},
+    "field_mapping": {
+      "title": [
+        "jsonld",
+        "title"
+      ],
+      "price": [
+        "jsonld",
+        "price"
+      ],
+      "rating": [
+        "jsonld",
+        "rating"
+      ],
+      "image_url": [
+        "jsonld",
+        "image_url"
+      ]
+    },
+    "fields": {
+      "title": "A Light in the Attic",
+      "price": 51.77,
+      "rating": "",
+      "image_url": "",
+      "currency": "GBP"
+    }
+  },
+  "sample_url": "https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html",
+  "success_count": 54,
+  "failure_count": 0,
+  "created_at": "2026-06-10T03:46:32.881635+00:00",
+  "updated_at": "2026-06-10T22:41:27.085447+00:00",
+  "last_success": {
+    "proxy_on": false,
+    "transport": "browser"
+  }
+}

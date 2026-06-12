@@ -15,6 +15,9 @@ uv run python manage.py migrate
 # Start dev server
 uv run python manage.py runserver
 
+# Start Celery worker (required for auto-scraping on add)
+uv run celery -A pricediff worker --loglevel=info
+
 # Scrape prices
 uv run python manage.py scrape
 

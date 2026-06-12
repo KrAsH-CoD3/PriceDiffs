@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from urllib.parse import urlparse
 from django.core.management.base import BaseCommand
-from app.strategy import scrape_url, _close_browser, forge_strategy, load_strategy, get_domain, STRATEGIES_DIR
+from app.strategy import scrape_url, load_strategy, get_domain, STRATEGIES_DIR
 
 NEW_SITES = [
     {
@@ -139,7 +139,6 @@ class Command(BaseCommand):
 
         tasks = [bound_scrape(site) for site in NEW_SITES]
         results = await asyncio.gather(*tasks)
-        await _close_browser()
         return results
 
     def _print_report(self, results):

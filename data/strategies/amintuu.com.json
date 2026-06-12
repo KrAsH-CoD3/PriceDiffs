@@ -1,7 +1,7 @@
 {
   "domain": "amintuu.com",
   "site_name": "Amintuu",
-  "strategy_type": "api",
+  "strategy_type": "jsonld",
   "api": {
     "endpoint": "https://www.amintuu.com/product/samsung-galaxy-s26-ultra-12gb256gb/",
     "method": "GET",
@@ -24,16 +24,17 @@
         "image_url"
       ]
     },
-    "_jsonld_fields": {
+    "fields": {
       "title": "Samsung Galaxy S26 Ultra (12GB+256GB)",
       "price": 1780200.0,
       "rating": "",
-      "image_url": "https://www.amintuu.com/wp-content/uploads/2026/04/s26-ultra-samsung.jpg"
+      "image_url": "https://www.amintuu.com/wp-content/uploads/2026/04/s26-ultra-samsung.jpg",
+      "currency": "NGN"
     }
   },
   "sample_url": "https://www.amintuu.com/product/samsung-galaxy-s26-ultra-12gb256gb/",
-  "success_count": 2,
+  "success_count": 11,
   "failure_count": 0,
-  "created_at": "2026-05-30T00:38:38.927075+00:00",
-  "updated_at": "2026-05-30T02:00:59.874301+00:00"
+  "created_at": "2026-06-10T03:46:31.520249+00:00",
+  "updated_at": "2026-06-10T06:26:07.743984+00:00"
 }

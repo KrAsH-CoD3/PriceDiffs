@@ -1,9 +1,9 @@
 {
   "domain": "simsng.com",
   "site_name": "Simsng",
-  "strategy_type": "api",
+  "strategy_type": "jsonld",
   "api": {
-    "endpoint": "https://simsng.com/product/tcl-98-inch-qd-mini-led-tv-98c6k/",
+    "endpoint": "https://simsng.com/product/tcl-ac-tac-18cfd-mcix-r32-inv-outdoor/",
     "method": "GET",
     "req_headers": {},
     "field_mapping": {
@@ -24,16 +24,21 @@
         "image_url"
       ]
     },
-    "_jsonld_fields": {
-      "title": "TCL 98\" Inch QD-Mini LED TV (98C6K)",
-      "price": 3277500.0,
+    "fields": {
+      "title": "TCL 2 HP Floor Standing AC (TAC-18CFD/MCI)",
+      "price": 1075200.0,
       "rating": "",
-      "image_url": "https://simsng.com/wp-content/uploads/2026/02/TCL20982220Inch20QD-Mini20LED20TV202898C6K29.jpg"
+      "image_url": "https://simsng.com/wp-content/uploads/2026/01/5BFG-TAC-18CFD-MC5D20TCL20AC20TAC-18CFD-MCIX-R32-INV20OUTDOOR20231.jpg",
+      "currency": "NGN"
     }
   },
-  "sample_url": "https://simsng.com/product/tcl-98-inch-qd-mini-led-tv-98c6k/",
-  "success_count": 9,
+  "sample_url": "https://simsng.com/product/tcl-ac-tac-18cfd-mcix-r32-inv-outdoor/",
+  "success_count": 41,
   "failure_count": 0,
-  "created_at": "2026-05-30T00:38:52.673024+00:00",
-  "updated_at": "2026-06-03T03:21:56.089633+00:00"
+  "created_at": "2026-06-09T18:06:32.401935+00:00",
+  "updated_at": "2026-06-12T03:48:04.164332+00:00",
+  "last_success": {
+    "proxy_on": false,
+    "transport": "http"
+  }
 }

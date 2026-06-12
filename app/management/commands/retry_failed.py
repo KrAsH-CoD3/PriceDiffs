@@ -3,7 +3,7 @@ import asyncio
 import json
 import sys
 from django.core.management.base import BaseCommand
-from app.strategy import scrape_url, forge_strategy, _close_browser, get_domain, load_strategy, STRATEGIES_DIR
+from app.strategy import scrape_url, get_domain, load_strategy, STRATEGIES_DIR
 
 FAILED_SITES = [
     {"name": "Jiji", "url": "https://jiji.ng/ikeja/headphones/soundcore-life-p2i-true-wireless-earbuds-utMhS4lawfnI31I8ifnP67Q5.html"},
@@ -65,7 +65,6 @@ class Command(BaseCommand):
             print(f"{'='*60}")
             r = await try_with_delay(site, 1, 4)
             all_results.append(r)
-        await _close_browser()
         return all_results
 
     def _report(self, results):

@@ -1,7 +1,7 @@
 {
   "domain": "nexussupermarket.com",
   "site_name": "Nexussupermarket",
-  "strategy_type": "api",
+  "strategy_type": "jsonld",
   "api": {
     "endpoint": "https://www.nexussupermarket.com/product/method-men-sea-surf-body-wash-532-ml/",
     "method": "GET",
@@ -24,17 +24,17 @@
         "image_url"
       ]
     },
-    "_jsonld_fields": {
+    "fields": {
       "title": "Method Men Sea + Surf Body Wash \u2014 532 ml - Nexus Supermarket",
       "price": 20000.0,
       "rating": "",
-      "image_url": "",
+      "image_url": "https://www.nexussupermarket.com/wp-content/uploads/2025/11/20251018_190144-scaled.jpg",
       "currency": "NGN"
     }
   },
   "sample_url": "https://www.nexussupermarket.com/product/method-men-sea-surf-body-wash-532-ml/",
-  "success_count": 2,
-  "failure_count": 0,
-  "created_at": "2026-06-02T09:46:21.888276+00:00",
-  "updated_at": "2026-06-02T09:54:27.367191+00:00"
+  "success_count": 6,
+  "failure_count": 3,
+  "created_at": "2026-06-10T03:47:09.491167+00:00",
+  "updated_at": "2026-06-10T05:51:11.876192+00:00"
 }

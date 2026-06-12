@@ -20,6 +20,7 @@ data/*.db
 # VS Code (shared via code-server)
 .vscode/
 
-.claude
+AGENTS.md
 CLAUDE.md
-AGENTSmd
+celerybeat-schedule
+.claude

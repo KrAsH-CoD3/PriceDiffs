@@ -36,18 +36,33 @@ class ProductSerializer(serializers.ModelSerializer):
     current_price = serializers.SerializerMethodField()
     price_change_24h = serializers.SerializerMethodField()
     snapshot_count = serializers.SerializerMethodField()
+    last_currency = serializers.SerializerMethodField()
+    last_scraped_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
         fields = [
             "id", "url", "title", "image_url", "rating",
             "created_at", "current_price", "price_change_24h", "snapshot_count",
+            "last_currency", "last_scraped_at",
         ]
         read_only_fields = ["id", "created_at"]
 
+    def _latest_snap(self, obj):
+        snaps = obj.snapshots.all()
+        return snaps[0] if snaps else None
+
     def get_current_price(self, obj) -> float | None:
-        snap = obj.snapshots.first()
+        snap = self._latest_snap(obj)
         return snap.price if snap else None
+
+    def get_last_currency(self, obj) -> str | None:
+        snap = self._latest_snap(obj)
+        return snap.currency if snap else None
+
+    def get_last_scraped_at(self, obj) -> str | None:
+        snap = self._latest_snap(obj)
+        return snap.scraped_at.isoformat() if snap else None
 
     def get_price_change_24h(self, obj) -> float | None:
         snapshots = list(obj.snapshots.all())
@@ -63,7 +78,7 @@ class ProductSerializer(serializers.ModelSerializer):
         return round(recent[-1].price - recent[0].price, 2)
 
     def get_snapshot_count(self, obj) -> int:
-        return obj.snapshots.count()
+        return len(obj.snapshots.all())
 
 
 class ProductDetailSerializer(serializers.ModelSerializer):

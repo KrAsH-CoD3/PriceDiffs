@@ -1,7 +1,7 @@
 {
   "domain": "kara.com.ng",
   "site_name": "Kara",
-  "strategy_type": "api",
+  "strategy_type": "jsonld",
   "api": {
     "endpoint": "https://kara.com.ng/iphone-17-promax-256gb",
     "method": "GET",
@@ -24,17 +24,21 @@
         "image_url"
       ]
     },
-    "_jsonld_fields": {
+    "fields": {
       "title": "Iphone 17 ProMax 256GB",
       "price": 2330000.0,
       "rating": "",
-      "image_url": "https://812aba1435e32fe27f783ee6f6acc1e4.r2.cloudflarestorage.com/kara-fastapi/products/276bc0b4-0515-40f2-959f-807f28bbd2d2.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=4b1c2915ddbd855510c2904abf77a550%2F20260602%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20260602T091011Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Signature=9253d2e09a38c516b1f9fe31fa1585fb4a35f6f4a6386bccdf33aeac87e89eae",
+      "image_url": "https://812aba1435e32fe27f783ee6f6acc1e4.r2.cloudflarestorage.com/kara-fastapi/products/276bc0b4-0515-40f2-959f-807f28bbd2d2.jpeg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=4b1c2915ddbd855510c2904abf77a550%2F20260610%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20260610T034704Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Signature=a8d49173af5a05f38bfac0cbb777ecb77c72dcd4d666e7303e4b47044b1ca630",
       "currency": "NGN"
     }
   },
   "sample_url": "https://kara.com.ng/iphone-17-promax-256gb",
-  "success_count": 3,
+  "success_count": 26,
   "failure_count": 0,
-  "created_at": "2026-06-02T09:10:11.319148+00:00",
-  "updated_at": "2026-06-02T09:34:46.877772+00:00"
+  "created_at": "2026-06-10T03:47:05.112631+00:00",
+  "updated_at": "2026-06-11T02:15:49.989001+00:00",
+  "last_success": {
+    "proxy_on": false,
+    "transport": "http"
+  }
 }

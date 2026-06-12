@@ -1,57 +1,81 @@
 import asyncio
-import os
+from datetime import datetime, timezone
 
-from app.strategy import scrape_url, _close_browser
+import httpx
+from asgiref.sync import sync_to_async
+from app.strategy import scrape_url, html_is_unavailable
 
-SCRAPE_INTERVAL_SECONDS = int(os.environ.get("PRICEDIFF_SCRAPE_INTERVAL", "3600"))
 _loop_task: asyncio.Task | None = None
 _stop_event = asyncio.Event()
 
+# Fixed scrape hours: midnight, 6am, noon, 6pm
+_SCRAPE_HOURS = {0, 6, 12, 18}
 
-def _import_models():
-    import django
-    import os
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "pricediff.settings")
-    django.setup()
-    from app.models import Product, PriceSnapshot
-    return Product, PriceSnapshot
+
+async def _check_gone(url: str) -> bool:
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+            resp = await client.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html",
+            })
+            if resp.status_code == 404:
+                return True
+            return html_is_unavailable(resp.text)
+    except Exception:
+        return False
 
 
 async def scrape_all():
-    Product, PriceSnapshot = _import_models()
-
-    products = list(Product.objects.all())
+    from app.models import Product, PriceSnapshot, ScrapeEvent
+    products = await sync_to_async(list)(Product.objects.all())
     if not products:
         return
-
     for product in products:
-        url = product.url
-        data = await scrape_url(url)
-        if not data:
-            continue
-
-        product.title = data.get("title", product.title)
-        product.image_url = data.get("image_url", product.image_url)
-        product.rating = data.get("rating", product.rating)
-        product.save()
-
-        PriceSnapshot.objects.create(
-            product=product,
-            price=data.get("price", 0),
-            currency=data.get("currency", "NGN"),
-        )
+        data = await scrape_url(product.url)
+        if data and data.get("title") and data.get("price", 0) > 0:
+            product.title = data.get("title", product.title)
+            product.image_url = data.get("image_url", product.image_url)
+            product.rating = data.get("rating", product.rating)
+            await sync_to_async(product.save)()
+            await sync_to_async(PriceSnapshot.objects.create)(
+                product=product,
+                price=data.get("price", 0),
+                currency=data.get("currency", "NGN"),
+            )
+        elif data is None and await _check_gone(product.url):
+            last = await sync_to_async(
+                lambda: PriceSnapshot.objects.filter(product=product).order_by("-scraped_at").first()
+            )()
+            count = await sync_to_async(
+                lambda: PriceSnapshot.objects.filter(product=product).count()
+            )()
+            event_data = {
+                "title": product.title or "",
+                "price": last.price if last else None,
+                "currency": last.currency if last else "NGN",
+                "image_url": product.image_url or "",
+                "rating": product.rating or "",
+                "scraped_at": last.scraped_at.isoformat() if last and last.scraped_at else "",
+                "snapshot_count": count,
+            }
+            await sync_to_async(ScrapeEvent.objects.create)(
+                product_id=product.id,
+                event_type="unavailable",
+                data=event_data,
+            )
 
 
 async def _run_loop():
     while not _stop_event.is_set():
-        try:
-            await scrape_all()
-        except Exception:
-            pass
-        try:
-            await asyncio.wait_for(_stop_event.wait(), timeout=SCRAPE_INTERVAL_SECONDS)
-        except asyncio.TimeoutError:
-            pass
+        now = datetime.now(timezone.utc)
+        if now.hour in _SCRAPE_HOURS and now.minute == 0:
+            try:
+                await scrape_all()
+            except Exception:
+                pass
+            await asyncio.sleep(61)
+        await asyncio.sleep(30)
 
 
 async def start():
@@ -69,5 +93,4 @@ async def stop():
             await _loop_task
         except (asyncio.CancelledError, Exception):
             pass
-    await _close_browser()
     await asyncio.sleep(0)
