@@ -1,0 +1,17 @@
+.venv
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info
+.git
+.gitignore
+.gitnexus
+.claude
+.vscode
+AGENTS.md
+CLAUDE.md
+celerybeat-schedule
+data/*.db
+.env
+.env.*
+README.md

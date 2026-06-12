@@ -13,7 +13,7 @@ dependencies = [
     "redis<8.0",
     "redislite>=6.2.912183",
     "scrapling[fetchers]>=0.4.8",
-    "scrapling[fetchers]>=0.3.11",
+    "httpx>=0.28.1",
     "pyvirtualdisplay>=3.0",
 ]
 
